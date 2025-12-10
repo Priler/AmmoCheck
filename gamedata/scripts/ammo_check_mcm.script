@@ -7,7 +7,7 @@
 -- Enhanced on: 2025.12.10
 -- 
 -- Changes:
---   - Performance optimizations (cached globals, reduced HUD access calls)
+--   - Performance optimizations (cached globals, reduced HUD access calls) * more info below
 --   - Fixed duplicate callback registration bug
 --   - Added display mode setting (text/numeric/both)
 --   - Added message duration settings
@@ -16,7 +16,15 @@
 --   - Added grenade mode checking toggle
 --   - Added configurable busy hands delay
 --   - Added independent debug mode toggle
---	 - Added additional highlight of ammo type equipped
+--	 - Added additional ammo tags ([FMJ], [AP]), [HP], etc.) + highlight of ammo type/ammo tag (optional)
+
+--[[
+    Performance optimizations (LUA *magic*):
+    - Cached global function lookups for direct access
+    - Cache of different things (Ammo type classification, Translation strings, is_supported_weapon results)
+    - Shared code where it's possible/required
+	- etc.
+]]
 
 
 
@@ -24,6 +32,12 @@
 local math_floor = math.floor
 local math_min = math.min
 local math_max = math.max
+local math_ceil = math.ceil
+local string_find = string.find
+local string_lower = string.lower
+local string_format = string.format
+local string_match = string.match
+local string_sub = string.sub
 
 -- Forward declarations --
 local gc = game.translate_string
@@ -33,16 +47,22 @@ local use_clr = false
 local hide_counter = true
 local hide_ammo_icon = true
 local busy_hands_fix = false
+local alt_mag_inspect = false
 local mcm_key = DIK_keys.DIK_T
 local msg_duration = 2
 local show_ammo_type = true
+local show_ammo_tag = true
 local busy_hands_delay = 1.5
 local check_grenade_mode = false
 local display_mode = 0          -- 0: text, 1: numeric, 2: both
 local auto_check_reload = false
 local color_intensity = 100
-local highlight_ammo_type = false
+local highlight_ammo_mode = 0   -- 0: none, 1: whole message, 2: separate lines
 local debug_mode = false
+
+-- Caches --
+local ammo_type_cache = {}      -- Cache for ammo type classification
+local translation_cache = {}    -- Cache for translation strings
 
 -- Color definitions --
 local function apply_intensity(color, intensity)
@@ -79,6 +99,32 @@ local clr05_LaserLemon = base_colors.clr05_LaserLemon
 local clr06_White = base_colors.clr06_White
 local clrEE_Purple = utils_xml.get_color("d_purple", true)
 
+-- Base ammo type colors (will be adjusted by intensity)
+local base_ammo_type_colors = {
+    ap = GetARGB(0xff, 0x80, 0xc0, 0xff),       -- Light blue
+    hp = GetARGB(0xff, 0xff, 0xc0, 0x80),       -- Light orange
+    fmj = GetARGB(0xff, 0x80, 0xff, 0x80),      -- Light green
+    tracer = GetARGB(0xff, 0xff, 0xff, 0x80),   -- Light yellow
+    fire = GetARGB(0xff, 0xff, 0x80, 0x40),     -- Orange-red
+    sub = GetARGB(0xff, 0xa0, 0xa0, 0xff),      -- Light purple
+    enhanced = GetARGB(0xff, 0xc0, 0xff, 0xc0), -- Pale green
+    slug = GetARGB(0xff, 0xc0, 0xc0, 0xc0),     -- Silver
+    buck = GetARGB(0xff, 0xff, 0xa0, 0xa0),     -- Light pink
+}
+
+-- Active ammo type colors (adjusted by intensity setting)
+local ammo_type_colors = {
+    ap = base_ammo_type_colors.ap,
+    hp = base_ammo_type_colors.hp,
+    fmj = base_ammo_type_colors.fmj,
+    tracer = base_ammo_type_colors.tracer,
+    fire = base_ammo_type_colors.fire,
+    sub = base_ammo_type_colors.sub,
+    enhanced = base_ammo_type_colors.enhanced,
+    slug = base_ammo_type_colors.slug,
+    buck = base_ammo_type_colors.buck,
+}
+
 -- Messages table (rebuilt when colors change)
 local messages = {}
 
@@ -110,6 +156,28 @@ local function update_colors()
     clr06_White = apply_intensity(base_colors.clr06_White, color_intensity)
     -- Rebuild messages table with new colors
     rebuild_messages()
+    
+    -- Update ammo type colors with intensity
+    ammo_type_colors.ap = apply_intensity(base_ammo_type_colors.ap, color_intensity)
+    ammo_type_colors.hp = apply_intensity(base_ammo_type_colors.hp, color_intensity)
+    ammo_type_colors.fmj = apply_intensity(base_ammo_type_colors.fmj, color_intensity)
+    ammo_type_colors.tracer = apply_intensity(base_ammo_type_colors.tracer, color_intensity)
+    ammo_type_colors.fire = apply_intensity(base_ammo_type_colors.fire, color_intensity)
+    ammo_type_colors.sub = apply_intensity(base_ammo_type_colors.sub, color_intensity)
+    ammo_type_colors.enhanced = apply_intensity(base_ammo_type_colors.enhanced, color_intensity)
+    ammo_type_colors.slug = apply_intensity(base_ammo_type_colors.slug, color_intensity)
+    ammo_type_colors.buck = apply_intensity(base_ammo_type_colors.buck, color_intensity)
+    print_dbg("update_colors: intensity=%s, ap_color=%s", tostring(color_intensity), tostring(ammo_type_colors.ap))
+end
+
+-- Cached translation lookup --
+local function get_translation(key)
+    local cached = translation_cache[key]
+    if cached then return cached end
+    
+    local translated = gc(key)
+    translation_cache[key] = translated
+    return translated
 end
 
 -- Debug logging --
@@ -149,7 +217,7 @@ end
 
 -- MagsRedux compatibility shim --
 function get_mag_loaded_shim(id)
-    give_news(gc("st_ac_magsredux_update") or "You are using an older version of MagsRedux. Update to Github version for best experience.")
+    give_news(get_translation("st_ac_magsredux_update") or "You are using an older version of MagsRedux. Update to Github version for best experience.")
     local mag_data = get_data(id)
     return (mag_data and mag_data.section ~= "no_mag") and mag_data or nil
 end
@@ -215,152 +283,440 @@ function on_key_hold(key)
     end
 end
 
--- Message display (global function for TimeEvent access) --
-function ac_display_message(message, clr)
+-- Message display --
+local function display_message(message, clr)
     if not message then return false end
-    
-    local dur = msg_duration or 2
-    
-    actor_menu.set_msg(1, message, dur, clr)
+    actor_menu.set_msg(1, message, msg_duration, clr)
     return true
 end
 
--- Ammo type classification --
--- Returns: type_key, display_prefix
+-- Ammo type classification (with caching) --
+-- Returns: type_key, display_tag
 local function classify_ammo_type(section)
     if not section then return "unknown", nil end
     
-    local sec_lower = string.lower(section)
-    
-    -- AP (Armor Piercing): ap, pp, pbp, bp, 7h14, 7n, sp10, ss190, dart, barrikada
-    if string.find(sec_lower, "_ap") 
-       or string.find(sec_lower, "_bp") 
-       or string.find(sec_lower, "_pbp")
-       or string.find(sec_lower, "_pp")
-       or string.find(sec_lower, "7h14")
-       or string.find(sec_lower, "7n")
-       or string.find(sec_lower, "sp10")
-       or string.find(sec_lower, "ss190")
-       or string.find(sec_lower, "_dart")
-       or string.find(sec_lower, "barrikada") then
-        return "ap", "[AP]"
+    -- Check cache first
+    local cached = ammo_type_cache[section]
+    if cached then
+        return cached.type, cached.tag
     end
     
+    local sec_lower = string_lower(section)
+    local result_type = "unknown"
+    local result_tag = nil
+    
+    -- AP (Armor Piercing): ap, pp, pbp, bp, 7h14, 7n, sp10, ss190, dart, barrikada
+    if string_find(sec_lower, "_ap") 
+       or string_find(sec_lower, "_bp") 
+       or string_find(sec_lower, "_pbp")
+       or string_find(sec_lower, "_pp")
+       or string_find(sec_lower, "7h14")
+       or string_find(sec_lower, "7n")
+       or string_find(sec_lower, "sp10")
+       or string_find(sec_lower, "ss190")
+       or string_find(sec_lower, "_dart")
+       or string_find(sec_lower, "barrikada") then
+        result_type, result_tag = "ap", "(AP)"
+    
     -- HP (Hollow Point): hp, jhp, hydro, sp (soft point)
-    if string.find(sec_lower, "_hp") 
-       or string.find(sec_lower, "jhp")
-       or string.find(sec_lower, "hydro")
-       or string.find(sec_lower, "_sp_") then
-        return "hp", "[HP]"
+    elseif string_find(sec_lower, "_hp") 
+       or string_find(sec_lower, "jhp")
+       or string_find(sec_lower, "hydro")
+       or string_find(sec_lower, "_sp_") then
+        result_type, result_tag = "hp", "(HP)"
+    
+    -- Tracer
+    elseif string_find(sec_lower, "_t_") 
+       or string_find(sec_lower, "_tracer") then
+        result_type, result_tag = "tracer", "(T)"
+    
+    -- Incendiary/Fire: fire, zp
+    elseif string_find(sec_lower, "fire") 
+       or string_find(sec_lower, "_zp") then
+        result_type, result_tag = "fire", "(I)"
+    
+    -- Subsonic
+    elseif string_find(sec_lower, "sub") then
+        result_type, result_tag = "sub", "(SUB)"
+    
+    -- Match/Enhanced: ep, pmm, pab9, 7h1
+    elseif string_find(sec_lower, "_ep")
+       or string_find(sec_lower, "_pmm")
+       or string_find(sec_lower, "pab9")
+       or string_find(sec_lower, "7h1") then
+        result_type, result_tag = "enhanced", "(+)"
+    
+    -- Slug (shotgun): slug, zhekan, shrapnel, eco
+    elseif string_find(sec_lower, "slug")
+       or string_find(sec_lower, "zhekan") 
+       or string_find(sec_lower, "shrapnel")
+       or string_find(sec_lower, "_eco") then
+        result_type, result_tag = "slug", "(SL)"
+    
+    -- Buckshot: buck, shot (but not shrapnel which is slug)
+    elseif string_find(sec_lower, "buck") 
+       or (string_find(sec_lower, "_shot") and not string_find(sec_lower, "shrapnel")) then
+        result_type, result_tag = "buck", "(BK)"
+    
+    -- FMJ/Ball/Standard: fmj, ball, ps, p, ss195
+    elseif string_find(sec_lower, "_fmj") 
+       or string_find(sec_lower, "_ball")
+       or string_find(sec_lower, "_ps")
+       or string_match(sec_lower, "_p$")
+       or string_find(sec_lower, "ss195") then
+        result_type, result_tag = "fmj", "(FMJ)"
+    end
+    
+    -- Store in cache
+    ammo_type_cache[section] = { type = result_type, tag = result_tag }
+    return result_type, result_tag
+end
+
+-- Get color for ammo type (used when highlight is enabled) --
+local function get_ammo_type_color(ammo_type)
+    return ammo_type_colors[ammo_type]
+end
+
+-- Remove duplicate suffix from ammo name if it matches the tag content --
+-- e.g., "9x19 HP" + "(HP)" → "9x19"
+local function remove_duplicate_suffix(ammo_name, tag)
+    if not ammo_name or not tag then return ammo_name end
+    
+    -- Extract tag content without parentheses (e.g., "HP" from "(HP)")
+    local tag_content = string_match(tag, "%((.+)%)")
+    if not tag_content then return ammo_name end
+    
+    local name_len = #ammo_name
+    local tag_len = #tag_content
+    
+    -- Need at least space + tag length
+    if name_len < tag_len + 1 then return ammo_name end
+    
+    -- Check if ends with " TAG" (case-insensitive)
+    local suffix_start = name_len - tag_len
+    local potential_suffix = string_sub(ammo_name, suffix_start + 1)
+    local char_before = string_sub(ammo_name, suffix_start, suffix_start)
+    
+    if char_before == " " and string_lower(potential_suffix) == string_lower(tag_content) then
+        return string_sub(ammo_name, 1, suffix_start - 1)
+    end
+    
+    return ammo_name
+end
+
+-- Classify ammo type based on display name (more reliable than section) --
+-- Returns: type_key, display_tag
+local function classify_ammo_by_name(ammo_name)
+    if not ammo_name or ammo_name == "" then return "unknown", nil end
+    
+    local name_lower = string_lower(ammo_name)
+    
+    -- HP variants (check early - common suffix)
+    if string_match(name_lower, " hp$") or string_match(name_lower, "hp$")
+       or string_find(name_lower, "jhp") or string_find(name_lower, "hydro") then
+        return "hp", "(HP)"
+    end
+    
+    -- AP variants (check after HP to avoid false positives)
+    if string_match(name_lower, " ap$") or string_match(name_lower, "ap$")
+       or string_match(name_lower, " bp$") or string_match(name_lower, "bp$")
+       or string_match(name_lower, " pbp$") or string_find(name_lower, " pp")
+       or string_find(name_lower, "sp10") or string_find(name_lower, "ss190") then
+        return "ap", "(AP)"
+    end
+    
+    -- 7N series (Russian AP designations - check separately)
+    if string_find(name_lower, "7n") then
+        return "ap", "(AP)"
     end
     
     -- Tracer
-    if string.find(sec_lower, "_t_") 
-       or string.find(sec_lower, "_tracer") then
-        return "tracer", "[T]"
+    if string_find(name_lower, "tracer") or string_match(name_lower, " t$") then
+        return "tracer", "(T)"
     end
     
-    -- Incendiary/Fire: fire, zp
-    if string.find(sec_lower, "fire") 
-       or string.find(sec_lower, "_zp") then
-        return "fire", "[I]"
+    -- Incendiary
+    if string_find(name_lower, "fire") or string_find(name_lower, "incend")
+       or string_find(name_lower, " zp") then
+        return "fire", "(I)"
     end
     
     -- Subsonic
-    if string.find(sec_lower, "sub") then
-        return "sub", "[SUB]"
+    if string_find(name_lower, "sub") then
+        return "sub", "(SUB)"
     end
     
-    -- Match/Enhanced: ep, pmm, pab9, 7h1
-    if string.find(sec_lower, "_ep")
-       or string.find(sec_lower, "_pmm")
-       or string.find(sec_lower, "pab9")
-       or string.find(sec_lower, "7h1") then
-        return "enhanced", "[+]"
+    -- Enhanced
+    if string_match(name_lower, " ep$") or string_find(name_lower, "pmm")
+       or string_find(name_lower, "match") then
+        return "enhanced", "(+)"
     end
     
-    -- Slug (shotgun): slug, zhekan, shrapnel, eco
-    if string.find(sec_lower, "slug")
-       or string.find(sec_lower, "zhekan") 
-       or string.find(sec_lower, "shrapnel")
-       or string.find(sec_lower, "_eco") then
-        return "slug", "[SL]"
+    -- Slug
+    if string_find(name_lower, "slug") or string_find(name_lower, "zhekan")
+       or string_find(name_lower, "shrapnel") or string_find(name_lower, "eco") then
+        return "slug", "(SL)"
     end
     
-    -- Buckshot: buck, shot (but not shrapnel which is slug)
-    if string.find(sec_lower, "buck") 
-       or (string.find(sec_lower, "_shot") and not string.find(sec_lower, "shrapnel")) then
-        return "buck", "[BK]"
+    -- Buckshot
+    if string_find(name_lower, "buck") or string_find(name_lower, "shot") then
+        return "buck", "(BK)"
     end
     
-    -- FMJ/Ball/Standard: fmj, ball, ps, p, ss195
-    if string.find(sec_lower, "_fmj") 
-       or string.find(sec_lower, "_ball")
-       or string.find(sec_lower, "_ps")
-       or string.match(sec_lower, "_p$")
-       or string.find(sec_lower, "ss195") then
-        return "fmj", "[FMJ]"
+    -- FMJ/Standard
+    if string_find(name_lower, "fmj") or string_find(name_lower, "ball")
+       or string_match(name_lower, " ps$") or string_match(name_lower, " p$") then
+        return "fmj", "(FMJ)"
     end
     
     return "unknown", nil
 end
 
--- Get color for ammo type (used when highlight is enabled) --
-local ammo_type_colors = {
-    ap = GetARGB(0xff, 0x80, 0xc0, 0xff),       -- Light blue
-    hp = GetARGB(0xff, 0xff, 0xc0, 0x80),       -- Light orange
-    fmj = GetARGB(0xff, 0x80, 0xff, 0x80),      -- Light green
-    tracer = GetARGB(0xff, 0xff, 0xff, 0x80),   -- Light yellow
-    fire = GetARGB(0xff, 0xff, 0x80, 0x40),     -- Orange-red
-    sub = GetARGB(0xff, 0xa0, 0xa0, 0xff),      -- Light purple
-    enhanced = GetARGB(0xff, 0xc0, 0xff, 0xc0), -- Pale green
-    slug = GetARGB(0xff, 0xc0, 0xc0, 0xc0),     -- Silver
-    buck = GetARGB(0xff, 0xff, 0xa0, 0xa0),     -- Light pink
-    unknown = nil,                              -- Use default color
-}
-
--- Format ammo type for display --
-local function format_ammo_type_string(ammo_section)
-    if not ammo_section then return "", nil end
+-- Format ammo type string for display --
+-- display_round: ammo section for name display (chambered round)
+-- tag_round: ammo section for tag classification (magazine contents)
+-- Returns: formatted_string, ammo_type_key, tag_for_separate_line
+-- Format ammo type string for display --
+-- display_round: ammo section for name display (chambered round)
+-- tag_round: ammo section for tag classification (magazine contents)
+-- Returns: formatted_string, ammo_type_key, tag_for_separate_line
+local function format_ammo_type_string(display_round, tag_round)
+    if not display_round and not tag_round then return "", nil, nil end
     
-    local ammo_name = gc(ui_item.get_sec_short_name(ammo_section))
-    if not ammo_name or ammo_name == "" then return "", nil end
-    
-    local ammo_type, prefix = classify_ammo_type(ammo_section)
-    
-    if highlight_ammo_type and prefix then
-        -- Add type prefix: "9x19 BP [AP]"
-        return ammo_name .. " " .. prefix, ammo_type
-    else
-        -- Just the name: "9x19 BP"
-        return ammo_name, ammo_type
-    end
-end
-
--- Format ammo display based on display_mode --
-local function format_ammo_message(text_msg, current, max, top_round)
     local result = ""
+    local separate_tag = nil
+    local ammo_type = nil
+    local tag = nil
     
-    if display_mode == 0 then
-        -- Text only
-        result = gc(text_msg)
-    elseif display_mode == 1 then
-        -- Numeric only
-        result = string.format("%d/%d", current, max)
-    else
-        -- Both
-        result = string.format("%s (%d/%d)", gc(text_msg), current, max)
-    end
-    
-    -- Append ammo type if enabled (always inline now)
-    if show_ammo_type and top_round then
-        local ammo_str, ammo_type = format_ammo_type_string(top_round)
-        if ammo_str and ammo_str ~= "" then
-            result = result .. ", " .. ammo_str
+    -- Always get ammo name for tag classification
+    -- Prefer tag_round (magazine contents) for consistent classification
+    local round_for_tag = tag_round or display_round
+    local ammo_name_for_tag = nil
+    if round_for_tag then
+        ammo_name_for_tag = gc(ui_item.get_sec_short_name(round_for_tag))
+        if ammo_name_for_tag == "" then
+            ammo_name_for_tag = nil
         end
     end
     
-    return result
+    -- Get tag from ammo name (more reliable than section)
+    if ammo_name_for_tag then
+        ammo_type, tag = classify_ammo_by_name(ammo_name_for_tag)
+    end
+    
+    -- If no tag from name, try section-based classification as fallback
+    if not tag and round_for_tag then
+        ammo_type, tag = classify_ammo_type(round_for_tag)
+    end
+    
+    -- Get display name only if show_ammo_type is enabled (use same round for consistency)
+    local ammo_name_display = nil
+    if show_ammo_type and ammo_name_for_tag then
+        ammo_name_display = ammo_name_for_tag
+    end
+    
+    -- Remove duplicate suffix if both ammo type and tag are shown
+    if ammo_name_display and show_ammo_tag and tag then
+        ammo_name_display = remove_duplicate_suffix(ammo_name_display, tag)
+    end
+    
+    -- Determine what to show and how to highlight
+    if show_ammo_tag and tag then
+        -- Tag is enabled - highlight applies to tag
+        if highlight_ammo_mode == 2 then
+            -- Separate lines: ammo name on line 1, tag on line 2
+            result = ammo_name_display or ""
+            separate_tag = tag
+        else
+            -- None or Whole: everything on one line
+            if ammo_name_display then
+                result = ammo_name_display .. " " .. tag
+            else
+                result = tag
+            end
+        end
+    elseif show_ammo_type and ammo_name_display then
+        -- Tag disabled but ammo type enabled - highlight applies to ammo type name
+        if highlight_ammo_mode == 2 then
+            -- Separate lines: nothing on line 1, ammo name on line 2 with color
+            result = ""
+            separate_tag = ammo_name_display
+        else
+            -- None or Whole: ammo name on line 1
+            result = ammo_name_display
+        end
+    end
+    
+    return result, ammo_type, separate_tag
+end
+
+-- Format ammo display based on display_mode --
+-- display_round: for ammo type name (chambered round)
+-- tag_round: for ammo tag classification (magazine contents)
+-- Returns: message, ammo_type_key, tag_for_separate_line
+local function format_ammo_message(text_msg, current, max, display_round, tag_round)
+    local result
+    
+    if display_mode == 0 then
+        -- Text only
+        result = get_translation(text_msg)
+    elseif display_mode == 1 then
+        -- Numeric only
+        result = string_format("%d/%d", current, max)
+    else
+        -- Both
+        result = string_format("%s (%d/%d)", get_translation(text_msg), current, max)
+    end
+    
+    local ammo_type = nil
+    local separate_tag = nil
+    
+    -- Append ammo info if enabled and we have ammo
+    if (show_ammo_type or show_ammo_tag) and (display_round or tag_round) then
+        local ammo_str, atype, tag = format_ammo_type_string(display_round, tag_round)
+        ammo_type = atype
+        separate_tag = tag
+        if ammo_str and ammo_str ~= "" then
+            -- Use comma only when ammo type name is shown
+            local separator = show_ammo_type and ", " or " "
+            result = result .. separator .. ammo_str
+        end
+    end
+    
+    return result, ammo_type, separate_tag
+end
+
+-- Shared ammo status calculation --
+-- Returns: message, color, ammo_type, separate_tag
+local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
+    local message = ""
+    local clr = nil
+    local ammo_type = nil
+    local separate_tag = nil
+    
+    local mag_data = get_mag_loaded(weaponId)
+    local is_supported = is_supported_weapon(sec)
+    
+    -- Determine weapon status and message
+    if is_jammed_weapon(weapon) then
+        message = get_translation("st_ac_jammed")
+        clr = use_clr and clr00_Red or clr06_White
+        
+    elseif in_grenade_mode then
+        message = currentAmmo == 1 and get_translation("st_ac_grenade") or get_translation("st_ac_empty")
+        clr = use_clr and (currentAmmo == 1 and clr06_White or clr00_Red) or clr06_White
+        
+    elseif currentAmmo == 0 then
+        if is_supported and not mag_data then
+            message = get_translation("st_ac_noMag")
+        else
+            message = get_translation("st_ac_empty")
+        end
+        clr = use_clr and clr00_Red or clr06_White
+        
+    else
+        local display_round = nil  -- For ammo type name
+        local tag_round = nil      -- For ammo tag
+        local max_ammo = 0
+        local base_mag_size = SYS_GetParam(2, sec, "ammo_mag_size", 0)
+        local is_chamber_only = false  -- Track if only chambered round remains
+        local has_empty_mag = false    -- Track if magazine is inserted but empty
+
+        if not mag_data and is_supported then
+            -- No magazine inserted, one in the chamber
+            currentAmmo = 1
+            max_ammo = 10
+            is_chamber_only = true
+            has_empty_mag = false
+        elseif is_supported and mag_data then
+            print_dbg("Checking magazine section: %s", mag_data.section)
+            max_ammo = SYS_GetParam(2, mag_data.section, "max_mag_size")
+            
+            if magazines_mcm and magazines_mcm.get_config("retain_round") then
+                -- With retain_round: last in array is chambered, second-to-last is magazine top
+                local mag_top = mag_data.loaded[#mag_data.loaded - 1]
+                if mag_top then
+                    display_round = mag_top
+                    tag_round = mag_top
+                else
+                    -- Only chambered round left, magazine is empty
+                    is_chamber_only = true
+                    has_empty_mag = true
+                end
+            else
+                -- Without retain_round: top of stack is what we'll fire next
+                display_round = stack.peek(mag_data.loaded)
+                tag_round = display_round
+            end
+        else
+            -- Non-MagsRedux weapon
+            display_round = get_sec_chambered(weapon)
+            tag_round = display_round
+            max_ammo = base_mag_size
+        end
+
+        local curAmmoPerc = currentAmmo / max_ammo
+
+        if currentAmmo == max_ammo + 1 then
+            message, ammo_type, separate_tag = format_ammo_message("st_ac_plus1", currentAmmo, max_ammo, display_round, tag_round)
+            clr = use_clr and clr06_White or clr06_White
+            
+        elseif curAmmoPerc > 1 then
+            message, ammo_type, separate_tag = format_ammo_message("st_ac_overfull", currentAmmo, max_ammo, display_round, tag_round)
+            clr = use_clr and clrEE_Purple or clr06_White
+            
+        elseif currentAmmo == 1 and base_mag_size == 2 then
+            message, ammo_type, separate_tag = format_ammo_message("st_ac_just_one", currentAmmo, max_ammo, display_round, tag_round)
+            clr = use_clr and clr03_Amber or clr06_White
+            
+        elseif is_chamber_only then
+            -- Chamber only - don't show ammo type/tag
+            if has_empty_mag then
+                message = get_translation("st_ac_empty_mag_oitc")
+            else
+                message = get_translation("st_ac_no_mag_oitc")
+            end
+            clr = use_clr and clr00_Red or clr06_White
+            
+        else
+            -- Calculate index based on percentage
+            -- Use ceil so 20% maps to index 2 (near_empty), not index 3 (less_half)
+            local idx
+            if currentAmmo == max_ammo then
+                idx = #messages -- Full
+            else
+                idx = clamp(math_ceil(curAmmoPerc * 10), 1, #messages - 1)
+            end
+            print_dbg("Ammo index: %s (%.1f%%, %d/%d)", idx, curAmmoPerc * 100, currentAmmo, max_ammo)
+            
+            message, ammo_type, separate_tag = format_ammo_message(messages[idx].m, currentAmmo, max_ammo, display_round, tag_round)
+            clr = use_clr and messages[idx].c or clr06_White
+            print_dbg("Color: use_clr=%s, idx=%s, clr=%s", tostring(use_clr), idx, tostring(clr))
+        end
+        
+        -- Apply ammo type color based on highlight mode
+        -- Only apply when Colored Messages is enabled
+        if use_clr and ammo_type and highlight_ammo_mode == 1 then
+            local ammo_clr = get_ammo_type_color(ammo_type)
+            print_dbg("Highlight override: mode=%s, ammo_type=%s, ammo_clr=%s", highlight_ammo_mode, ammo_type, tostring(ammo_clr))
+            if ammo_clr then
+                clr = ammo_clr
+            end
+        end
+    end
+    
+    return message, clr, ammo_type, separate_tag
+end
+
+-- Display ammo status with optional second line --
+local function display_ammo_status(message, clr, ammo_type, separate_tag)
+    display_message(message, clr)
+    
+    -- Display separate tag line if mode 2
+    if highlight_ammo_mode == 2 and separate_tag then
+        local tag_clr = use_clr and get_ammo_type_color(ammo_type) or clr06_White
+        actor_menu.set_msg(2, separate_tag, msg_duration, tag_clr)
+    end
 end
 
 -- Auto-check after reload - triggered when HUD animation ends --
@@ -368,43 +724,39 @@ local pending_reload_check = false
 
 function actor_on_hud_animation_end(item, section, motion, state, slot)
     if not auto_check_reload then return end
+    if not motion then return end
     if not item then return end
     if not IsWeapon(item) then return end
     
-    -- Detect reload animations:
-    -- Regular weapons: "reload", "anm_reload", "anm_reload_empty", etc.
-    -- Shotguns: "anm_open" starts reload, "anm_close" ends reload
-    if motion then
-        local motion_lower = string.lower(motion)
+    local motion_lower = string_lower(motion)
+    
+    -- Mark that we're in a shotgun reload sequence
+    if string_find(motion_lower, "open") and string_find(motion_lower, "anm") then
+        pending_reload_check = true
+        print_dbg("Shotgun reload started: %s", motion)
+        return
+    end
+    
+    -- Check for reload completion
+    local is_reload_end = string_find(motion_lower, "reload") or 
+                          (pending_reload_check and string_find(motion_lower, "close"))
+    
+    if is_reload_end then
+        pending_reload_check = false
+        print_dbg("Reload animation ended: %s", motion)
         
-        -- Mark that we're in a shotgun reload sequence
-        if string.find(motion_lower, "open") and string.find(motion_lower, "anm") then
-            pending_reload_check = true
-            print_dbg("Shotgun reload started: %s", motion)
-            return
-        end
-        
-        -- Check for reload completion
-        local is_reload_end = string.find(motion_lower, "reload") or 
-                              (pending_reload_check and string.find(motion_lower, "close"))
-        
-        if is_reload_end then
-            pending_reload_check = false
-            print_dbg("Reload animation ended: %s", motion)
+        -- Small delay to ensure weapon state is updated, then show message directly
+        CreateTimeEvent("ammo_check", "auto_check", 0.15, function()
+            local actor = db.actor
+            if not actor then return true end
             
-            -- Small delay to ensure weapon state is updated, then show message directly
-            CreateTimeEvent("ammo_check", "auto_check", 0.15, function()
-                local actor = db.actor
-                if not actor then return true end
-                
-                local weapon = actor:active_item()
-                if not weapon or not IsWeapon(weapon) then return true end
-                
-                -- Build and display message directly (no weapon hide animation)
-                check_Ammo_silent()
-                return true
-            end)
-        end
+            local weapon = actor:active_item()
+            if not weapon or not IsWeapon(weapon) then return true end
+            
+            -- Build and display message directly (no weapon hide animation)
+            check_Ammo_silent()
+            return true
+        end)
     end
 end
 
@@ -462,7 +814,14 @@ function on_mcm_load()
                 } 
             },
             { id = "show_ammo_type", type = "check", val = 1, def = true },
-            { id = "highlight_ammo_type", type = "check", val = 1, def = false },
+            { id = "show_ammo_tag", type = "check", val = 1, def = true },
+            { id = "highlight_ammo_mode", type = "list", val = 2, def = 0,
+                content = {
+                    { 0, "ham_none" },
+                    { 1, "ham_whole" },
+                    { 2, "ham_separate" }
+                }
+            },
             { id = "msg_duration", type = "track", val = 2, min = 1, max = 5, step = 0.5, def = 2 },
             
             -- HUD Settings
@@ -481,6 +840,7 @@ function on_mcm_load()
             { id = "divider_anim", type = "line" },
             { id = "title_anim", type = "title", text = "ui_mcm_rax_ammo_check_title_anim" },
             { id = "busy_hands_fix", type = "check", val = 1, def = false },
+            { id = "alt_mag_inspect", type = "check", val = 1, def = false },
             { id = "busy_hands_delay", type = "track", val = 2, min = 0.5, max = 3, step = 0.25, def = 1.5 },
             
             -- Keybind Settings
@@ -510,14 +870,25 @@ function actor_on_first_update()
 end
 
 function on_option_change()
+    -- Clear caches when settings change
+    ammo_type_cache = {}
+    translation_cache = {}
+    
     if ui_mcm then
         -- Display settings
-        use_clr = ui_mcm.get("rax_ammo_check/usecolor")
+        local clr_val = ui_mcm.get("rax_ammo_check/usecolor")
+        -- MCM might return true/false, 1/0, or nil
+        use_clr = (clr_val == true or clr_val == 1)
         color_intensity = ui_mcm.get("rax_ammo_check/color_intensity") or 100
+        update_colors() -- Apply color intensity changes
+        print_dbg("Settings loaded: use_clr=%s (raw=%s), color_intensity=%s", tostring(use_clr), tostring(clr_val), tostring(color_intensity))
         display_mode = ui_mcm.get("rax_ammo_check/display_mode") or 0
         show_ammo_type = ui_mcm.get("rax_ammo_check/show_ammo_type")
         if show_ammo_type == nil then show_ammo_type = true end
-        highlight_ammo_type = ui_mcm.get("rax_ammo_check/highlight_ammo_type")
+        show_ammo_tag = ui_mcm.get("rax_ammo_check/show_ammo_tag")
+        if show_ammo_tag == nil then show_ammo_tag = true end
+        highlight_ammo_mode = ui_mcm.get("rax_ammo_check/highlight_ammo_mode") or 0
+        print_dbg("Ammo settings: show_type=%s, show_tag=%s, highlight_mode=%s", tostring(show_ammo_type), tostring(show_ammo_tag), tostring(highlight_ammo_mode))
         msg_duration = ui_mcm.get("rax_ammo_check/msg_duration") or 2
         
         -- HUD settings
@@ -532,6 +903,7 @@ function on_option_change()
         
         -- Animation settings
         busy_hands_fix = ui_mcm.get("rax_ammo_check/busy_hands_fix")
+        alt_mag_inspect = ui_mcm.get("rax_ammo_check/alt_mag_inspect")
         busy_hands_delay = ui_mcm.get("rax_ammo_check/busy_hands_delay") or 1.5
         
         -- Debug settings
@@ -549,6 +921,9 @@ function on_option_change()
 
     -- Update colors based on intensity
     update_colors()
+    
+    -- Clear translation cache when options change (language might have changed)
+    translation_cache = {}
     
     -- Update HUD elements (cached access)
     local hud_states = ActorMenu.get_maingame().m_ui_hud_states
@@ -569,6 +944,18 @@ end
 -- Legacy function name for compatibility --
 function checkAmmo() end
 
+-- Pending message globals for TimeEvent access --
+local ac_pending_message = nil
+local ac_pending_clr = nil
+local ac_pending_ammo_type = nil
+local ac_pending_separate_tag = nil
+
+-- Pre-defined callback for delayed display --
+local function delayed_display_callback()
+    display_ammo_status(ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag)
+    return true
+end
+
 -- Silent ammo check (no weapon hide animation) - used for auto-check after reload --
 function check_Ammo_silent()
     local actor = db.actor
@@ -588,66 +975,11 @@ function check_Ammo_silent()
     local currentAmmo = weapon:get_ammo_in_magazine()
     if not currentAmmo then return end
 
-    local message = ""
-    local clr = nil
-    local mag_data = get_mag_loaded(weaponId)
-
-    -- Determine weapon status and message
-    if is_jammed_weapon(weapon) then
-        message = gc("st_ac_jammed")
-        clr = use_clr and clr00_Red or nil
-        
-    elseif in_grenade_mode then
-        message = currentAmmo == 1 and gc("st_ac_grenade") or gc("st_ac_empty")
-        clr = use_clr and (currentAmmo == 1 and clr06_White or clr00_Red) or nil
-        
-    elseif currentAmmo == 0 then
-        if is_supported_weapon(sec) and not mag_data then
-            message = gc("st_ac_noMag")
-        else
-            message = gc("st_ac_empty")
-        end
-        clr = use_clr and clr00_Red or nil
-        
-    else
-        local top_round = nil
-        local max_ammo = 0
-
-        if not mag_data and is_supported_weapon(sec) then
-            currentAmmo = 1
-            max_ammo = 10
-        elseif is_supported_weapon(sec) and mag_data then
-            max_ammo = SYS_GetParam(2, mag_data.section, "max_mag_size")
-            top_round = magazines_mcm and magazines_mcm.get_config("retain_round") and mag_data.loaded[#mag_data.loaded - 1] or stack.peek(mag_data.loaded)
-        else
-            top_round = get_sec_chambered(weapon)
-            max_ammo = SYS_GetParam(2, sec, "ammo_mag_size")
-        end
-
-        local curAmmoPerc = currentAmmo / max_ammo
-        local base_mag_size = SYS_GetParam(2, sec, "ammo_mag_size", 0)
-
-        if currentAmmo == max_ammo + 1 then
-            message = format_ammo_message("st_ac_plus1", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
-            clr = use_clr and clr06_White or nil
-        elseif curAmmoPerc > 1 then
-            message = format_ammo_message("st_ac_overfull", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
-            clr = clrEE_Purple
-        elseif currentAmmo == 1 and base_mag_size == 2 then
-            message = format_ammo_message("st_ac_just_one", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
-            clr = use_clr and clr03_Amber or nil
-        elseif currentAmmo == 1 and not mag_data and is_supported_weapon(sec) then
-            message = format_ammo_message("st_ac_oitc", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
-            clr = use_clr and clr00_Red or nil
-        else
-            local idx = clamp(l_round((curAmmoPerc * 10) + 0.5), 1, #messages)
-            message = format_ammo_message(messages[idx].m, currentAmmo, max_ammo, top_round)
-            clr = use_clr and messages[idx].c or nil
-        end
-    end
-
-    -- Display message directly without animation
-    ac_display_message(message, clr)
+    -- Get ammo status using shared function
+    local message, clr, ammo_type, separate_tag = get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
+    
+    -- Display directly
+    display_ammo_status(message, clr, ammo_type, separate_tag)
 end
 
 -- Main ammo check function --
@@ -667,94 +999,41 @@ function check_Ammo(skip_animation)
     local currentState = weapon:get_state()
     local in_grenade_mode = weapon:weapon_in_grenade_mode()
     
-    -- State validation
-    if currentState ~= 0 then return end
+    -- If weapon is busy (animation playing), just show message without animation
+    local weapon_busy = (currentState ~= 0)
+    
+    -- If in grenade mode and check is disabled, return
     if in_grenade_mode and not check_grenade_mode then return end
 
     local currentAmmo = weapon:get_ammo_in_magazine()
     if not currentAmmo then return end
 
-    local message = ""
-    local clr = nil
-    local mag_data = get_mag_loaded(weaponId)
-
-    -- Determine weapon status and message
-    if is_jammed_weapon(weapon) then
-        message = gc("st_ac_jammed")
-        clr = use_clr and clr00_Red or nil
-        
-    elseif in_grenade_mode then
-        message = currentAmmo == 1 and gc("st_ac_grenade") or gc("st_ac_empty")
-        clr = use_clr and (currentAmmo == 1 and clr06_White or clr00_Red) or nil
-        
-    elseif currentAmmo == 0 then
-        if is_supported_weapon(sec) and not mag_data then
-            message = gc("st_ac_noMag")
-        else
-            message = gc("st_ac_empty")
-        end
-        clr = use_clr and clr00_Red or nil
-        
-    else
-        local top_round = nil
-        local max_ammo = 0
-
-        if not mag_data and is_supported_weapon(sec) then
-            -- One in the chamber, no magazine
-            currentAmmo = 1
-            max_ammo = 10
-        elseif is_supported_weapon(sec) and mag_data then
-            print_dbg("Checking magazine section: %s", mag_data.section)
-            max_ammo = SYS_GetParam(2, mag_data.section, "max_mag_size")
-            top_round = magazines_mcm and magazines_mcm.get_config("retain_round") and mag_data.loaded[#mag_data.loaded - 1] or stack.peek(mag_data.loaded)
-        else
-            top_round = get_sec_chambered(weapon)
-            max_ammo = SYS_GetParam(2, sec, "ammo_mag_size")
-        end
-
-        local curAmmoPerc = currentAmmo / max_ammo
-        local base_mag_size = SYS_GetParam(2, sec, "ammo_mag_size", 0)
-
-        if currentAmmo == max_ammo + 1 then
-            message = format_ammo_message("st_ac_plus1", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
-            clr = use_clr and clr06_White or nil
-            
-        elseif curAmmoPerc > 1 then
-            message = format_ammo_message("st_ac_overfull", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
-            clr = clrEE_Purple -- Always colored - this is an error state
-            
-        elseif currentAmmo == 1 and base_mag_size == 2 then
-            message = format_ammo_message("st_ac_just_one", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
-            clr = use_clr and clr03_Amber or nil
-            
-        elseif currentAmmo == 1 and not mag_data and is_supported_weapon(sec) then
-            message = format_ammo_message("st_ac_oitc", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
-            clr = use_clr and clr00_Red or nil
-            
-        else
-            -- Calculate index with bounds clamping
-            local idx = clamp(l_round((curAmmoPerc * 10) + 0.5), 1, #messages)
-            print_dbg("Ammo index: %s (%.1f%%, %d/%d)", idx, curAmmoPerc * 100, currentAmmo, max_ammo)
-            
-            message = format_ammo_message(messages[idx].m, currentAmmo, max_ammo, top_round)
-            clr = use_clr and messages[idx].c or nil
-        end
-    end
+    -- Get ammo status using shared function
+    local message, clr, ammo_type, separate_tag = get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
 
     disable_info("sleep_active")
 
-    -- Store message/color in globals for TimeEvent access
+    -- Store in globals for TimeEvent access
     ac_pending_message = message
     ac_pending_clr = clr
+    ac_pending_ammo_type = ammo_type
+    ac_pending_separate_tag = separate_tag
 
     -- Display the message
-    if skip_animation or busy_hands_fix then
-        local delay = skip_animation and 0 or busy_hands_delay
-        CreateTimeEvent("ammo_check", "message_delay", delay, function()
-            ac_display_message(ac_pending_message, ac_pending_clr)
-            return true
-        end)
+    if skip_animation or busy_hands_fix or weapon_busy then
+        -- Show immediately if skipping animation, using busy hands fix, or weapon is busy
+        local delay = skip_animation and 0 or (weapon_busy and 0 or busy_hands_delay)
+        RemoveTimeEvent("ammo_check", "message_delay")
+        RemoveTimeEvent("ammo_check", "restore_weapon")
+        CreateTimeEvent("ammo_check", "message_delay", delay, delayed_display_callback)
+    elseif alt_mag_inspect then
+        -- Alternative animation: lower weapon like pressing B, show message with delay
+        game.actor_lower_weapon(true)
+        RemoveTimeEvent("ammo_check", "message_delay")
+        RemoveTimeEvent("ammo_check", "restore_weapon")
+        CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
     else
+        -- Default animation: lower weapon, show message, raise weapon
         local slot = actor:active_slot()
         actor:activate_slot(0)
         weapon_hidden = true
@@ -768,7 +1047,7 @@ function check_Ammo(skip_animation)
                 weapon_hidden = false
                 return true
             end
-            ac_display_message(ac_pending_message, ac_pending_clr)
+            display_ammo_status(ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag)
             db.actor:activate_slot(s)
             return true
         end, slot)

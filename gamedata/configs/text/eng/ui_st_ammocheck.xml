@@ -10,6 +10,12 @@
     <string id="st_ac_oitc">
         <text>1 in the chamber</text>
     </string>
+    <string id="st_ac_empty_mag_oitc">
+        <text>Empty magazine + 1 in the chamber</text>
+    </string>
+    <string id="st_ac_no_mag_oitc">
+        <text>No magazine + 1 in the chamber</text>
+    </string>
     <string id="st_ac_just_one">
         <text>Just one</text>
     </string>
@@ -38,7 +44,7 @@
         <text>Jammed Weapon</text>
     </string>
     <string id="st_ac_noMag">
-        <text>No Magazine loaded</text>
+        <text>No magazine</text>
     </string>
     <string id="st_ac_grenade">
         <text>Grenade loaded</text>
@@ -114,13 +120,29 @@
         <text>Show Ammo Type</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_show_ammo_type_desc">
-        <text>Append the current ammo type name to the status message.</text>
+        <text>Display the ammo type name in the message (e.g. "9x19 BP", "5.45x39 PS").</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_highlight_ammo_type">
-        <text>Show Ammo Type Tag</text>
+    <string id="ui_mcm_rax_ammo_check_show_ammo_tag">
+        <text>Show Ammo Tag</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_highlight_ammo_type_desc">
-        <text>Append ammo type classification tag to the name (e.g. [AP], [HP], [FMJ], [SL] for slug, [BK] for buckshot).</text>
+    <string id="ui_mcm_rax_ammo_check_show_ammo_tag_desc">
+        <text>Append ammo classification tag to the message (e.g. (AP), (HP), (FMJ), (SL), (BK)).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_highlight_ammo_mode">
+        <text>Ammo Type Highlight</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_highlight_ammo_mode_desc">
+        <text>Color the message based on ammo type. None: use ammo level color. Whole message: color entire line by ammo type. Separate lines: show ammo tag on second line with its color.</text>
+    </string>
+    <!-- Highlight Ammo Mode List Options (no ui_mcm_ prefix for list values) -->
+    <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_none">
+        <text>None</text>
+    </string>
+    <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_whole">
+        <text>Whole Message</text>
+    </string>
+    <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_separate">
+        <text>Separate Lines</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_msg_duration">
         <text>Message Duration</text>
@@ -164,11 +186,17 @@
     <string id="ui_mcm_rax_ammo_check_busy_hands_fix_desc">
         <text>Enable if the ammo check animation gets stuck. Likely needed when FDDA is installed.</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_alt_mag_inspect">
+        <text>Alternative Mag Inspect</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_alt_mag_inspect_desc">
+        <text>For weapons without a proper mag inspect animation: instead of hiding and showing the weapon, just lower it (like pressing B). You'll need to raise the weapon manually.</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_busy_hands_delay">
         <text>Message Delay</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_busy_hands_delay_desc">
-        <text>Delay before showing the message when Busy Hands Fix is enabled (in seconds).</text>
+        <text>Delay before showing the message when using Alternative Mag Inspect or Busy Hands Fix (in seconds).</text>
     </string>
 
     <!-- Keybind Settings -->

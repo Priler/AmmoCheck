@@ -10,6 +10,12 @@
     <string id="st_ac_oitc">
         <text>1 в патроннике</text>
     </string>
+    <string id="st_ac_empty_mag_oitc">
+        <text>Пустой магазин + 1 в патроннике</text>
+    </string>
+    <string id="st_ac_no_mag_oitc">
+        <text>Нет магазина + 1 в патроннике</text>
+    </string>
     <string id="st_ac_just_one">
         <text>Всего один</text>
     </string>
@@ -38,7 +44,7 @@
         <text>Заклинившее оружие</text>
     </string>
     <string id="st_ac_noMag">
-        <text>Магазин не заряжен</text>
+        <text>Нет магазина</text>
     </string>
     <string id="st_ac_grenade">
         <text>Заряжена граната</text>
@@ -114,13 +120,29 @@
         <text>Показывать тип патронов</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_show_ammo_type_desc">
-        <text>Добавлять название типа патронов к сообщению о статусе.</text>
+        <text>Отображать название типа патронов в сообщении (например "9x19 БП", "5.45x39 ПС").</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_highlight_ammo_type">
-        <text>Метка типа патронов</text>
+    <string id="ui_mcm_rax_ammo_check_show_ammo_tag">
+        <text>Показывать метку патронов</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_highlight_ammo_type_desc">
-        <text>Добавлять метку классификации к названию патронов (напр. [AP], [HP], [FMJ], [SL] для пули, [BK] для картечи).</text>
+    <string id="ui_mcm_rax_ammo_check_show_ammo_tag_desc">
+        <text>Добавлять метку классификации патронов к сообщению (например (AP), (HP), (FMJ), (SL), (BK)).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_highlight_ammo_mode">
+        <text>Подсветка типа патронов</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_highlight_ammo_mode_desc">
+        <text>Цвет сообщения на основе типа патронов. Нет: цвет по уровню патронов. Всё сообщение: весь текст цветом типа патронов. Отдельные строки: метка типа на второй строке своим цветом.</text>
+    </string>
+    <!-- Highlight Ammo Mode List Options (no ui_mcm_ prefix for list values) -->
+    <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_none">
+        <text>Нет</text>
+    </string>
+    <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_whole">
+        <text>Всё сообщение</text>
+    </string>
+    <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_separate">
+        <text>Отдельные строки</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_msg_duration">
         <text>Длительность сообщения</text>
@@ -164,11 +186,17 @@
     <string id="ui_mcm_rax_ammo_check_busy_hands_fix_desc">
         <text>Включите, если анимация проверки патронов зависает. Вероятно при установленном FDDA.</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_alt_mag_inspect">
+        <text>Альтернативная проверка магазина</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_alt_mag_inspect_desc">
+        <text>Для оружия без анимации проверки магазина: вместо убирания и доставания оружия, просто опустить его (как при нажатии B). Оружие нужно поднять вручную.</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_busy_hands_delay">
         <text>Задержка сообщения</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_busy_hands_delay_desc">
-        <text>Задержка перед показом сообщения при включённом исправлении "занятых рук" (в секундах).</text>
+        <text>Задержка перед показом сообщения при использовании альтернативной проверки или исправления "занятых рук" (в секундах).</text>
     </string>
 
     <!-- Keybind Settings -->
