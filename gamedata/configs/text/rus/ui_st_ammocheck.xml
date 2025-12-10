@@ -1,82 +1,192 @@
 <?xml version="1.0" encoding="windows-1251"?>
 <string_table>
-	<!-- Ammo_Check Messages -->
-	<string id="st_ac_overfull">
-		<text>Переполнен</text>
-	</string>
-	<string id="st_ac_plus1">
-		<text>Полный + 1</text>
-	</string>
-	<string id="st_ac_just_one">
-		<text>Всего один</text>
-	</string>
-	<string id="st_ac_oitc">
-		<text>1 в патроннике</text>
-	</string>
-	<string id="st_ac_full">
-		<text>Полный</text>
-	</string>
-	<string id="st_ac_nearly_full">
-		<text>Почти полный</text>
-	</string>
-	<string id="st_ac_more_half">
-		<text>Больше половины</text>
-	</string>
-	<string id="st_ac_about_half">
-		<text>Примерно половина</text>
-	</string>
-	<string id="st_ac_less_half">
-		<text>Меньше половины</text>
-	</string>
-	<string id="st_ac_near_empty">
-		<text>Почти пустой</text>
-	</string>
-	<string id="st_ac_empty">
-		<text>Пустой</text>
-	</string>
-	<string id="st_ac_jammed">
-		<text>Заклинившее оружие</text>
-	</string>
-	<string id="st_ac_noMag">
-		<text>Магазин не заряжен</text>
-	</string>
-	<string id="st_ac_grenade">
-		<text>Заряжена граната</text>
-	</string>
-	<string id="st_ac_noAmmo">
-		<text>Текущее оружие не стреляет патронами!</text>
-	</string>
-	<string id="st_ac_ammoLeft">
-		<text>осталось</text>
-	</string>
-	<string id="ui_mcm_menu_rax_ammo_check">
-		<text>Проверка патронов</text>
-	</string>
-	<string id="ui_mm_title_rax_ammo_check">
-		<text>Проверка патронов</text>
-	</string>
-	<string id="ui_mcm_rax_ammo_check_usecolor">
-		<text>Цветные сообщения</text>
-	</string>
-	<string id="ui_mcm_rax_ammo_check_hidecounter">
-		<text>Спрятать счётчик патронов</text>
-	</string>
-	<string id="ui_mcm_rax_ammo_check_hideicon">
-		<text>Спрятать иконку патронов</text>
-	</string>
-	<string id="ui_mcm_rax_ammo_check_busy_hands_fix">
-		<text>Исправление "занятых рук"</text>
-	</string>
-	<string id="ui_mcm_rax_ammo_check_busy_hands_fix_desc">
-		<text>Включите, если "анимация" проверки патронов зависает. Высокая вероятность такого события, если установлена модификация FDDA.</text>
-	</string>
-	<string id="ui_mcm_rax_ammo_check_keybind">
-		<text>Клавиша проверки патронов</text>
-	</string>
-	<string id="ui_mcm_rax_ammo_check_keybind_desc">
-		<text>Этой клавише можно назначить дополнительные модификаторы для избежания конфликтов с другими действиями.</text>
-	</string>
-	<string id="ui_mcm_rax_ammo_check_update_mcm">
-		<text>Обновите MCM чтобы назначить клавишу прямо здесь. По умолчанию это будет клавиша T.</text>
-	</string>
+    <!-- Ammo_Check Messages -->
+    <string id="st_ac_overfull">
+        <text>Переполнен</text>
+    </string>
+    <string id="st_ac_plus1">
+        <text>Полный + 1</text>
+    </string>
+    <string id="st_ac_oitc">
+        <text>1 в патроннике</text>
+    </string>
+    <string id="st_ac_just_one">
+        <text>Всего один</text>
+    </string>
+    <string id="st_ac_full">
+        <text>Полный</text>
+    </string>
+    <string id="st_ac_nearly_full">
+        <text>Почти полный</text>
+    </string>
+    <string id="st_ac_more_half">
+        <text>Больше половины</text>
+    </string>
+    <string id="st_ac_about_half">
+        <text>Примерно половина</text>
+    </string>
+    <string id="st_ac_less_half">
+        <text>Меньше половины</text>
+    </string>
+    <string id="st_ac_near_empty">
+        <text>Почти пустой</text>
+    </string>
+    <string id="st_ac_empty">
+        <text>Пустой</text>
+    </string>
+    <string id="st_ac_jammed">
+        <text>Заклинившее оружие</text>
+    </string>
+    <string id="st_ac_noMag">
+        <text>Магазин не заряжен</text>
+    </string>
+    <string id="st_ac_grenade">
+        <text>Заряжена граната</text>
+    </string>
+    <string id="st_ac_noAmmo">
+        <text>Текущее оружие не стреляет патронами!</text>
+    </string>
+    <string id="st_ac_ammoLeft">
+        <text>осталось</text>
+    </string>
+    <string id="st_ac_magsredux_update">
+        <text>Вы используете устаревшую версию MagsRedux. Обновите до версии с Github для лучшего опыта.</text>
+    </string>
+
+    <!-- MCM Menu Header -->
+    <string id="ui_mcm_menu_rax_ammo_check">
+        <text>Проверка патронов</text>
+    </string>
+    <string id="ui_mm_title_rax_ammo_check">
+        <text>Проверка патронов</text>
+    </string>
+
+    <!-- Section Titles -->
+    <string id="ui_mcm_rax_ammo_check_title_display">
+        <text>Настройки отображения</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_title_hud">
+        <text>Настройки интерфейса</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_title_behavior">
+        <text>Настройки поведения</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_title_anim">
+        <text>Настройки анимации</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_title_keys">
+        <text>Настройки клавиш</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_title_debug">
+        <text>Отладка</text>
+    </string>
+
+    <!-- Display Settings -->
+    <string id="ui_mcm_rax_ammo_check_usecolor">
+        <text>Цветные сообщения</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_usecolor_desc">
+        <text>Включить цветовую индикацию сообщений в зависимости от уровня патронов (красный = мало, белый = полный).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_color_intensity">
+        <text>Интенсивность цвета</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_color_intensity_desc">
+        <text>Настройка яркости цветных сообщений. Меньшие значения дают более тусклые цвета.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_mode">
+        <text>Режим отображения</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_mode_desc">
+        <text>Выберите способ отображения количества патронов: текстовое описание, числовое значение или оба.</text>
+    </string>
+    <!-- Display Mode List Options (no ui_mcm_ prefix for list values) -->
+    <string id="rax_ammo_check_display_mode_lst_dm_text">
+        <text>Только текст</text>
+    </string>
+    <string id="rax_ammo_check_display_mode_lst_dm_numeric">
+        <text>Только числа</text>
+    </string>
+    <string id="rax_ammo_check_display_mode_lst_dm_both">
+        <text>Текст + числа</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_show_ammo_type">
+        <text>Показывать тип патронов</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_show_ammo_type_desc">
+        <text>Добавлять название типа патронов к сообщению о статусе.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_highlight_ammo_type">
+        <text>Метка типа патронов</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_highlight_ammo_type_desc">
+        <text>Добавлять метку классификации к названию патронов (напр. [AP], [HP], [FMJ], [SL] для пули, [BK] для картечи).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_msg_duration">
+        <text>Длительность сообщения</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_msg_duration_desc">
+        <text>Как долго сообщение о статусе патронов остаётся на экране (в секундах).</text>
+    </string>
+
+    <!-- HUD Settings -->
+    <string id="ui_mcm_rax_ammo_check_hidecounter">
+        <text>Спрятать счётчик патронов</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hidecounter_desc">
+        <text>Скрыть стандартный счётчик патронов для большего погружения.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hideicon">
+        <text>Спрятать иконку патронов</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hideicon_desc">
+        <text>Скрыть иконку типа патронов из интерфейса.</text>
+    </string>
+
+    <!-- Behavior Settings -->
+    <string id="ui_mcm_rax_ammo_check_check_grenade_mode">
+        <text>Проверка в режиме гранатомёта</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_check_grenade_mode_desc">
+        <text>Разрешить проверку патронов, когда оружие находится в режиме гранатомёта.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_auto_check_reload">
+        <text>Авто-проверка после перезарядки</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_auto_check_reload_desc">
+        <text>Автоматически показывать статус патронов после завершения перезарядки.</text>
+    </string>
+
+    <!-- Animation Settings -->
+    <string id="ui_mcm_rax_ammo_check_busy_hands_fix">
+        <text>Исправление "занятых рук"</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_busy_hands_fix_desc">
+        <text>Включите, если анимация проверки патронов зависает. Вероятно при установленном FDDA.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_busy_hands_delay">
+        <text>Задержка сообщения</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_busy_hands_delay_desc">
+        <text>Задержка перед показом сообщения при включённом исправлении "занятых рук" (в секундах).</text>
+    </string>
+
+    <!-- Keybind Settings -->
+    <string id="ui_mcm_rax_ammo_check_keybind">
+        <text>Клавиша проверки патронов</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_keybind_desc">
+        <text>Клавиша для проверки патронов. Может комбинироваться с модификаторами.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_update_mcm">
+        <text>Обновите MCM чтобы назначить клавишу здесь. По умолчанию — клавиша T.</text>
+    </string>
+
+    <!-- Debug Settings -->
+    <string id="ui_mcm_rax_ammo_check_debug_mode">
+        <text>Режим отладки</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_debug_mode_desc">
+        <text>Включить отладочное логирование (независимо от глобальной настройки MCM).</text>
+    </string>
 </string_table>

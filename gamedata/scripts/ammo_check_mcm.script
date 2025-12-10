@@ -1,52 +1,130 @@
--- AmmoCheck
+-- AmmoCheck (Enhanced)
+-- Original: https://github.com/RAX-Anomaly/AmmoCheck
+-- Original Authors: Ishmaeel, RavenAscendant, ahuyn, Utjan
 -- Last modified: 2022.08.17
--- https://github.com/RAX-Anomaly/AmmoCheck
+-- 
+-- Enhanced by: Abraham (Priler)
+-- Enhanced on: 2025.12.10
+-- 
+-- Changes:
+--   - Performance optimizations (cached globals, reduced HUD access calls)
+--   - Fixed duplicate callback registration bug
+--   - Added display mode setting (text/numeric/both)
+--   - Added message duration settings
+--   - Added auto-check after reload
+--   - Added color intensity adjustment
+--   - Added grenade mode checking toggle
+--   - Added configurable busy hands delay
+--   - Added independent debug mode toggle
+--	 - Added additional highlight of ammo type equipped
 
--- settings--
+
+
+-- Cached globals for performance --
+local math_floor = math.floor
+local math_min = math.min
+local math_max = math.max
+
+-- Forward declarations --
+local gc = game.translate_string
+
+-- Settings (defaults) --
 local use_clr = false
 local hide_counter = true
 local hide_ammo_icon = true
 local busy_hands_fix = false
 local mcm_key = DIK_keys.DIK_T
+local msg_duration = 2
+local show_ammo_type = true
+local busy_hands_delay = 1.5
+local check_grenade_mode = false
+local display_mode = 0          -- 0: text, 1: numeric, 2: both
+local auto_check_reload = false
+local color_intensity = 100
+local highlight_ammo_type = false
+local debug_mode = false
 
--- locals --
-local clr00_Red = GetARGB(0xff, 0xff, 0x00, 0x00)
-local clr01_RedOrange = GetARGB(0xff, 0xff, 0x40, 0x00)
-local clr02_Orange = GetARGB(0xff, 0xff, 0x80, 0x00)
-local clr03_Amber = GetARGB(0xff, 0xff, 0xc0, 0x00)
-local clr04_LemonGlacier = GetARGB(0xff, 0xff, 0xff, 0x00)
-local clr05_LaserLemon = GetARGB(0xff, 0xff, 0xff, 0x80)
-local clr06_White = GetARGB(0xff, 0xff, 0xff, 0xff)
+-- Color definitions --
+local function apply_intensity(color, intensity)
+    if not color or intensity >= 100 then return color end
+    local a = bit.band(bit.rshift(color, 24), 0xFF)
+    local r = bit.band(bit.rshift(color, 16), 0xFF)
+    local g = bit.band(bit.rshift(color, 8), 0xFF)
+    local b = bit.band(color, 0xFF)
+    local factor = intensity / 100
+    r = math_floor(r * factor)
+    g = math_floor(g * factor)
+    b = math_floor(b * factor)
+    return GetARGB(a, r, g, b)
+end
 
-local clrEE_Purple = utils_xml.get_color("d_purple", true)
-
--- nil - no ammo check in progress
--- 1 - set flag to catch during on hud anim play
--- 2 - play manually
-local do_ammo_check_anim
-local no_mag_check
-
--- the misalignment of the colors and the text means 2x the info without 2x the text.
-local messages = {
-    { m = "st_ac_near_empty", c = clr00_Red }, -- <1/10
-    { m = "st_ac_near_empty", c = clr01_RedOrange }, -- <2/10
-    { m = "st_ac_less_half", c = clr01_RedOrange }, -- <3/10
-    { m = "st_ac_less_half", c = clr02_Orange }, -- <4/10
-    { m = "st_ac_about_half", c = clr02_Orange }, -- <5/10
-    { m = "st_ac_about_half", c = clr03_Amber }, -- <6/10
-    { m = "st_ac_more_half", c = clr03_Amber }, -- <7/10
-    { m = "st_ac_more_half", c = clr04_LemonGlacier }, -- <8/10
-    { m = "st_ac_nearly_full", c = clr04_LemonGlacier }, -- <9/10
-    { m = "st_ac_nearly_full", c = clr05_LaserLemon }, -- <10/10
-    { m = "st_ac_full", c = clr06_White } -- full
+-- Base colors (will be adjusted by intensity)
+local base_colors = {
+    clr00_Red = GetARGB(0xff, 0xff, 0x00, 0x00),
+    clr01_RedOrange = GetARGB(0xff, 0xff, 0x40, 0x00),
+    clr02_Orange = GetARGB(0xff, 0xff, 0x80, 0x00),
+    clr03_Amber = GetARGB(0xff, 0xff, 0xc0, 0x00),
+    clr04_LemonGlacier = GetARGB(0xff, 0xff, 0xff, 0x00),
+    clr05_LaserLemon = GetARGB(0xff, 0xff, 0xff, 0x80),
+    clr06_White = GetARGB(0xff, 0xff, 0xff, 0xff),
 }
 
+-- Active colors (adjusted by intensity setting)
+local clr00_Red = base_colors.clr00_Red
+local clr01_RedOrange = base_colors.clr01_RedOrange
+local clr02_Orange = base_colors.clr02_Orange
+local clr03_Amber = base_colors.clr03_Amber
+local clr04_LemonGlacier = base_colors.clr04_LemonGlacier
+local clr05_LaserLemon = base_colors.clr05_LaserLemon
+local clr06_White = base_colors.clr06_White
+local clrEE_Purple = utils_xml.get_color("d_purple", true)
+
+-- Messages table (rebuilt when colors change)
+local messages = {}
+
+-- Must be defined before update_colors since it's called from there
+local function rebuild_messages()
+    messages = {
+        { m = "st_ac_near_empty", c = clr00_Red },         -- <1/10
+        { m = "st_ac_near_empty", c = clr01_RedOrange },   -- <2/10
+        { m = "st_ac_less_half", c = clr01_RedOrange },    -- <3/10
+        { m = "st_ac_less_half", c = clr02_Orange },       -- <4/10
+        { m = "st_ac_about_half", c = clr02_Orange },      -- <5/10
+        { m = "st_ac_about_half", c = clr03_Amber },       -- <6/10
+        { m = "st_ac_more_half", c = clr03_Amber },        -- <7/10
+        { m = "st_ac_more_half", c = clr04_LemonGlacier }, -- <8/10
+        { m = "st_ac_nearly_full", c = clr04_LemonGlacier }, -- <9/10
+        { m = "st_ac_nearly_full", c = clr05_LaserLemon }, -- <10/10
+        { m = "st_ac_full", c = clr06_White }              -- full
+    }
+end
+rebuild_messages() -- Initialize
+
+local function update_colors()
+    clr00_Red = apply_intensity(base_colors.clr00_Red, color_intensity)
+    clr01_RedOrange = apply_intensity(base_colors.clr01_RedOrange, color_intensity)
+    clr02_Orange = apply_intensity(base_colors.clr02_Orange, color_intensity)
+    clr03_Amber = apply_intensity(base_colors.clr03_Amber, color_intensity)
+    clr04_LemonGlacier = apply_intensity(base_colors.clr04_LemonGlacier, color_intensity)
+    clr05_LaserLemon = apply_intensity(base_colors.clr05_LaserLemon, color_intensity)
+    clr06_White = apply_intensity(base_colors.clr06_White, color_intensity)
+    -- Rebuild messages table with new colors
+    rebuild_messages()
+end
+
+-- Debug logging --
 local dbg_log
 function print_dbg(msg, ...)
+    if not debug_mode then
+        if not mcm_log then
+            return
+        elseif not ui_mcm or not ui_mcm.MCM_DEBUG then
+            return
+        end
+    end
+    
     if not mcm_log then
         printf("![AC] " .. msg, ...)
-    elseif not ui_mcm.MCM_DEBUG then -- use MCM's debug log setting
-        return
     else
         if not dbg_log then
             dbg_log = mcm_log.new("![AC]")
@@ -56,25 +134,52 @@ function print_dbg(msg, ...)
     end
 end
 
+-- Utility functions --
 function null_function()
     return false
 end
 
-function get_mag_loaded_shim(id)
-    give_news("You are using an older version of MagsRedux. Update to Github version for best experience.")
+local function l_round(value)
+    return math_floor(value + 0.5)
+end
 
+local function clamp(val, min_val, max_val)
+    return math_min(math_max(val, min_val), max_val)
+end
+
+-- MagsRedux compatibility shim --
+function get_mag_loaded_shim(id)
+    give_news(gc("st_ac_magsredux_update") or "You are using an older version of MagsRedux. Update to Github version for best experience.")
     local mag_data = get_data(id)
     return (mag_data and mag_data.section ~= "no_mag") and mag_data or nil
 end
 
+-- MagsRedux function references (set in on_game_start) --
+get_data = null_function
+set_data = null_function
+get_mag_loaded = null_function
+is_supported_weapon = null_function
+is_jammed_weapon = null_function
+get_sec_chambered = null_function
+
+-- Keybind system --
 local mcm_keybinds = ui_mcm and ui_mcm.key_hold
 local modifier = 0
 local mode = 0
 
 local modes = {
-    [0] = { ["call"] = { "on_key_press", "on_key_hold" }, ["function"] = function(key) ui_mcm.simple_press("rax_ammo_check", key, check_Ammo) end },
-    [1] = { ["call"] = { "on_key_press", "on_key_hold" }, ["function"] = function(key) if ui_mcm.double_tap("rax_ammo_check", key) then check_Ammo() end end },
-    [2] = { ["call"] = { "on_key_hold", "on_key_press" }, ["function"] = function(key) if ui_mcm.key_hold("rax_ammo_check", key) then check_Ammo() end end }
+    [0] = { 
+        ["call"] = { "on_key_press", "on_key_hold" }, 
+        ["function"] = function(key) ui_mcm.simple_press("rax_ammo_check", key, check_Ammo) end 
+    },
+    [1] = { 
+        ["call"] = { "on_key_press", "on_key_hold" }, 
+        ["function"] = function(key) if ui_mcm.double_tap("rax_ammo_check", key) then check_Ammo() end end 
+    },
+    [2] = { 
+        ["call"] = { "on_key_hold", "on_key_press" }, 
+        ["function"] = function(key) if ui_mcm.key_hold("rax_ammo_check", key) then check_Ammo() end end 
+    }
 }
 
 local direction_keys = {
@@ -88,7 +193,6 @@ local direction_keys = {
 local weapon_hidden = false
 
 function on_key_press(key)
-    -- do not interrupt if directional key pressed
     local bind = dik_to_bind(key)
     if weapon_hidden and not direction_keys[bind] then
         weapon_hidden = false
@@ -111,61 +215,294 @@ function on_key_hold(key)
     end
 end
 
-function l_round(value)
-    local min = math.floor(value + 0.5)
-    return min
+-- Message display (global function for TimeEvent access) --
+function ac_display_message(message, clr)
+    if not message then return false end
+    
+    local dur = msg_duration or 2
+    
+    actor_menu.set_msg(1, message, dur, clr)
+    return true
 end
 
-function on_game_start()
-    -- aliases--
-    gc = game.translate_string
+-- Ammo type classification --
+-- Returns: type_key, display_prefix
+local function classify_ammo_type(section)
+    if not section then return "unknown", nil end
+    
+    local sec_lower = string.lower(section)
+    
+    -- AP (Armor Piercing): ap, pp, pbp, bp, 7h14, 7n, sp10, ss190, dart, barrikada
+    if string.find(sec_lower, "_ap") 
+       or string.find(sec_lower, "_bp") 
+       or string.find(sec_lower, "_pbp")
+       or string.find(sec_lower, "_pp")
+       or string.find(sec_lower, "7h14")
+       or string.find(sec_lower, "7n")
+       or string.find(sec_lower, "sp10")
+       or string.find(sec_lower, "ss190")
+       or string.find(sec_lower, "_dart")
+       or string.find(sec_lower, "barrikada") then
+        return "ap", "[AP]"
+    end
+    
+    -- HP (Hollow Point): hp, jhp, hydro, sp (soft point)
+    if string.find(sec_lower, "_hp") 
+       or string.find(sec_lower, "jhp")
+       or string.find(sec_lower, "hydro")
+       or string.find(sec_lower, "_sp_") then
+        return "hp", "[HP]"
+    end
+    
+    -- Tracer
+    if string.find(sec_lower, "_t_") 
+       or string.find(sec_lower, "_tracer") then
+        return "tracer", "[T]"
+    end
+    
+    -- Incendiary/Fire: fire, zp
+    if string.find(sec_lower, "fire") 
+       or string.find(sec_lower, "_zp") then
+        return "fire", "[I]"
+    end
+    
+    -- Subsonic
+    if string.find(sec_lower, "sub") then
+        return "sub", "[SUB]"
+    end
+    
+    -- Match/Enhanced: ep, pmm, pab9, 7h1
+    if string.find(sec_lower, "_ep")
+       or string.find(sec_lower, "_pmm")
+       or string.find(sec_lower, "pab9")
+       or string.find(sec_lower, "7h1") then
+        return "enhanced", "[+]"
+    end
+    
+    -- Slug (shotgun): slug, zhekan, shrapnel, eco
+    if string.find(sec_lower, "slug")
+       or string.find(sec_lower, "zhekan") 
+       or string.find(sec_lower, "shrapnel")
+       or string.find(sec_lower, "_eco") then
+        return "slug", "[SL]"
+    end
+    
+    -- Buckshot: buck, shot (but not shrapnel which is slug)
+    if string.find(sec_lower, "buck") 
+       or (string.find(sec_lower, "_shot") and not string.find(sec_lower, "shrapnel")) then
+        return "buck", "[BK]"
+    end
+    
+    -- FMJ/Ball/Standard: fmj, ball, ps, p, ss195
+    if string.find(sec_lower, "_fmj") 
+       or string.find(sec_lower, "_ball")
+       or string.find(sec_lower, "_ps")
+       or string.match(sec_lower, "_p$")
+       or string.find(sec_lower, "ss195") then
+        return "fmj", "[FMJ]"
+    end
+    
+    return "unknown", nil
+end
 
+-- Get color for ammo type (used when highlight is enabled) --
+local ammo_type_colors = {
+    ap = GetARGB(0xff, 0x80, 0xc0, 0xff),       -- Light blue
+    hp = GetARGB(0xff, 0xff, 0xc0, 0x80),       -- Light orange
+    fmj = GetARGB(0xff, 0x80, 0xff, 0x80),      -- Light green
+    tracer = GetARGB(0xff, 0xff, 0xff, 0x80),   -- Light yellow
+    fire = GetARGB(0xff, 0xff, 0x80, 0x40),     -- Orange-red
+    sub = GetARGB(0xff, 0xa0, 0xa0, 0xff),      -- Light purple
+    enhanced = GetARGB(0xff, 0xc0, 0xff, 0xc0), -- Pale green
+    slug = GetARGB(0xff, 0xc0, 0xc0, 0xc0),     -- Silver
+    buck = GetARGB(0xff, 0xff, 0xa0, 0xa0),     -- Light pink
+    unknown = nil,                              -- Use default color
+}
+
+-- Format ammo type for display --
+local function format_ammo_type_string(ammo_section)
+    if not ammo_section then return "", nil end
+    
+    local ammo_name = gc(ui_item.get_sec_short_name(ammo_section))
+    if not ammo_name or ammo_name == "" then return "", nil end
+    
+    local ammo_type, prefix = classify_ammo_type(ammo_section)
+    
+    if highlight_ammo_type and prefix then
+        -- Add type prefix: "9x19 BP [AP]"
+        return ammo_name .. " " .. prefix, ammo_type
+    else
+        -- Just the name: "9x19 BP"
+        return ammo_name, ammo_type
+    end
+end
+
+-- Format ammo display based on display_mode --
+local function format_ammo_message(text_msg, current, max, top_round)
+    local result = ""
+    
+    if display_mode == 0 then
+        -- Text only
+        result = gc(text_msg)
+    elseif display_mode == 1 then
+        -- Numeric only
+        result = string.format("%d/%d", current, max)
+    else
+        -- Both
+        result = string.format("%s (%d/%d)", gc(text_msg), current, max)
+    end
+    
+    -- Append ammo type if enabled (always inline now)
+    if show_ammo_type and top_round then
+        local ammo_str, ammo_type = format_ammo_type_string(top_round)
+        if ammo_str and ammo_str ~= "" then
+            result = result .. ", " .. ammo_str
+        end
+    end
+    
+    return result
+end
+
+-- Auto-check after reload - triggered when HUD animation ends --
+local pending_reload_check = false
+
+function actor_on_hud_animation_end(item, section, motion, state, slot)
+    if not auto_check_reload then return end
+    if not item then return end
+    if not IsWeapon(item) then return end
+    
+    -- Detect reload animations:
+    -- Regular weapons: "reload", "anm_reload", "anm_reload_empty", etc.
+    -- Shotguns: "anm_open" starts reload, "anm_close" ends reload
+    if motion then
+        local motion_lower = string.lower(motion)
+        
+        -- Mark that we're in a shotgun reload sequence
+        if string.find(motion_lower, "open") and string.find(motion_lower, "anm") then
+            pending_reload_check = true
+            print_dbg("Shotgun reload started: %s", motion)
+            return
+        end
+        
+        -- Check for reload completion
+        local is_reload_end = string.find(motion_lower, "reload") or 
+                              (pending_reload_check and string.find(motion_lower, "close"))
+        
+        if is_reload_end then
+            pending_reload_check = false
+            print_dbg("Reload animation ended: %s", motion)
+            
+            -- Small delay to ensure weapon state is updated, then show message directly
+            CreateTimeEvent("ammo_check", "auto_check", 0.15, function()
+                local actor = db.actor
+                if not actor then return true end
+                
+                local weapon = actor:active_item()
+                if not weapon or not IsWeapon(weapon) then return true end
+                
+                -- Build and display message directly (no weapon hide animation)
+                check_Ammo_silent()
+                return true
+            end)
+        end
+    end
+end
+
+function actor_on_weapon_jammed(weapon)
+    print_dbg("Weapon jammed")
+end
+
+-- Game initialization --
+function on_game_start()
+    -- Setup MagsRedux integration
     if magazine_binder then
         get_data = magazine_binder.get_data
         set_data = magazine_binder.set_data
-        get_mag_loaded = magazine_binder.get_mag_loaded or get_mag_loaded_shim -- get_mag_loaded does not exist in moddb version. MagsRedux needs update.
+        get_mag_loaded = magazine_binder.get_mag_loaded or get_mag_loaded_shim
         is_supported_weapon = magazine_binder.is_supported_weapon
         is_jammed_weapon = magazines.is_jammed_weapon
         get_sec_chambered = magazines.get_sec_chambered
         print_dbg("MagsRedux installed. Working in integrated mode.")
     else
-        get_data = null_function -- Should not be called, just in case.
-        set_data = null_function -- Should not be called, just in case.
-        is_supported_weapon = null_function -- Always returns false, meaning none of the weapons are supported, fall back on vanilla ammo handling.
-        get_mag_loaded = null_function -- There is never a loaded magazine in vanilla.
-        is_jammed_weapon = null_function -- Sadly, standalone mode does not report weapon jams for now.
-        get_sec_chambered = null_function -- No "one-in-the-chamber" feature in vanilla.
+        get_data = null_function
+        set_data = null_function
+        is_supported_weapon = null_function
+        get_mag_loaded = null_function
+        is_jammed_weapon = null_function
+        get_sec_chambered = null_function
         print_dbg("MagsRedux not found. Working in standalone mode.")
     end
 
     RegisterScriptCallback("actor_on_first_update", actor_on_first_update)
     RegisterScriptCallback("on_option_change", on_option_change)
-    RegisterScriptCallback("on_option_change", on_option_change)
     RegisterScriptCallback("on_key_press", on_key_press)
-	if GAME_VERSION ~= "1.5.1" then 
-		RegisterScriptCallback("actor_on_hud_animation_play", actor_on_hud_animation_play)
-	end
+    RegisterScriptCallback("actor_on_hud_animation_end", actor_on_hud_animation_end)
+    RegisterScriptCallback("actor_on_weapon_jammed", actor_on_weapon_jammed)
 end
 
--- Script Callbacks --
-
+-- MCM Configuration --
 function on_mcm_load()
-    ch_options = {
+    return {
         id = "rax_ammo_check",
         sh = true,
         gr = {
+            -- Header
             { id = "ammo_check", type = "slide", link = "ui_options_slider_player", text = "ui_mm_title_rax_ammo_check", size = { 512, 50 }, spacing = 20 },
+            
+            -- Display Settings
+            { id = "divider_display", type = "line" },
+            { id = "title_display", type = "title", text = "ui_mcm_rax_ammo_check_title_display" },
             { id = "usecolor", type = "check", val = 1, def = false },
+            { id = "color_intensity", type = "track", val = 2, min = 30, max = 100, step = 10, def = 100 },
+            { id = "display_mode", type = "list", val = 2, def = 0, 
+                content = { 
+                    { 0, "dm_text" }, 
+                    { 1, "dm_numeric" }, 
+                    { 2, "dm_both" } 
+                } 
+            },
+            { id = "show_ammo_type", type = "check", val = 1, def = true },
+            { id = "highlight_ammo_type", type = "check", val = 1, def = false },
+            { id = "msg_duration", type = "track", val = 2, min = 1, max = 5, step = 0.5, def = 2 },
+            
+            -- HUD Settings
+            { id = "divider_hud", type = "line" },
+            { id = "title_hud", type = "title", text = "ui_mcm_rax_ammo_check_title_hud" },
             { id = "hidecounter", type = "check", val = 1, def = true },
             { id = "hideicon", type = "check", val = 1, def = true },
+            
+            -- Behavior Settings
+            { id = "divider_behavior", type = "line" },
+            { id = "title_behavior", type = "title", text = "ui_mcm_rax_ammo_check_title_behavior" },
+            { id = "check_grenade_mode", type = "check", val = 1, def = false },
+            { id = "auto_check_reload", type = "check", val = 1, def = false },
+            
+            -- Animation Settings
+            { id = "divider_anim", type = "line" },
+            { id = "title_anim", type = "title", text = "ui_mcm_rax_ammo_check_title_anim" },
             { id = "busy_hands_fix", type = "check", val = 1, def = false },
+            { id = "busy_hands_delay", type = "track", val = 2, min = 0.5, max = 3, step = 0.25, def = 1.5 },
+            
+            -- Keybind Settings
+            { id = "divider_keys", type = "line" },
+            { id = "title_keys", type = "title", text = "ui_mcm_rax_ammo_check_title_keys" },
             { id = "keybind", type = "key_bind", val = 2, def = DIK_keys.DIK_F },
-            { id = "modifier", type = ui_mcm.kb_mod_radio, val = 2, def = 0, hint = "mcm_kb_modifier", content = { { 0, "mcm_kb_mod_none" }, { 1, "mcm_kb_mod_shift" }, { 3, "mcm_kb_mod_alt" } } }, --I removed control from the list, note the values of the other options were unchanged.
-            { id = "mode", type = ui_mcm.kb_mod_radio, val = 2, def = 2, hint = "mcm_kb_mode", content = { { 0, "mcm_kb_mode_press" }, { 1, "mcm_kb_mode_dtap" }, { 2, "mcm_kb_mode_hold" } } },
-            { id = "desc_mcm", type = "desc", text = "ui_mcm_rax_ammo_check_update_mcm", clr = { 255, 175, 0, 0 }, precondition = { function() return not mcm_keybinds end } },
+            { id = "modifier", type = ui_mcm.kb_mod_radio, val = 2, def = 0, hint = "mcm_kb_modifier", 
+                content = { { 0, "mcm_kb_mod_none" }, { 1, "mcm_kb_mod_shift" }, { 3, "mcm_kb_mod_alt" } } 
+            },
+            { id = "mode", type = ui_mcm.kb_mod_radio, val = 2, def = 2, hint = "mcm_kb_mode", 
+                content = { { 0, "mcm_kb_mode_press" }, { 1, "mcm_kb_mode_dtap" }, { 2, "mcm_kb_mode_hold" } } 
+            },
+            { id = "desc_mcm", type = "desc", text = "ui_mcm_rax_ammo_check_update_mcm", clr = { 255, 175, 0, 0 }, 
+                precondition = { function() return not mcm_keybinds end } 
+            },
+            
+            -- Debug Settings
+            { id = "divider_debug", type = "line" },
+            { id = "title_debug", type = "title", text = "ui_mcm_rax_ammo_check_title_debug" },
+            { id = "debug_mode", type = "check", val = 1, def = false },
         }
     }
-    return ch_options
 end
 
 function actor_on_first_update()
@@ -174,275 +511,279 @@ end
 
 function on_option_change()
     if ui_mcm then
-        hide_counter = ui_mcm.get("rax_ammo_check/hidecounter")
+        -- Display settings
         use_clr = ui_mcm.get("rax_ammo_check/usecolor")
+        color_intensity = ui_mcm.get("rax_ammo_check/color_intensity") or 100
+        display_mode = ui_mcm.get("rax_ammo_check/display_mode") or 0
+        show_ammo_type = ui_mcm.get("rax_ammo_check/show_ammo_type")
+        if show_ammo_type == nil then show_ammo_type = true end
+        highlight_ammo_type = ui_mcm.get("rax_ammo_check/highlight_ammo_type")
+        msg_duration = ui_mcm.get("rax_ammo_check/msg_duration") or 2
+        
+        -- HUD settings
+        hide_counter = ui_mcm.get("rax_ammo_check/hidecounter")
+        if hide_counter == nil then hide_counter = true end
         hide_ammo_icon = ui_mcm.get("rax_ammo_check/hideicon")
+        if hide_ammo_icon == nil then hide_ammo_icon = true end
+        
+        -- Behavior settings
+        check_grenade_mode = ui_mcm.get("rax_ammo_check/check_grenade_mode")
+        auto_check_reload = ui_mcm.get("rax_ammo_check/auto_check_reload")
+        
+        -- Animation settings
         busy_hands_fix = ui_mcm.get("rax_ammo_check/busy_hands_fix")
+        busy_hands_delay = ui_mcm.get("rax_ammo_check/busy_hands_delay") or 1.5
+        
+        -- Debug settings
+        debug_mode = ui_mcm.get("rax_ammo_check/debug_mode")
+        
+        -- Keybind settings
         if mcm_keybinds then
             mcm_key = ui_mcm.get("rax_ammo_check/keybind")
-            mode = ui_mcm.get("rax_ammo_check/mode")
-            modifier = ui_mcm.get("rax_ammo_check/modifier")
+            mode = ui_mcm.get("rax_ammo_check/mode") or 0
+            modifier = ui_mcm.get("rax_ammo_check/modifier") or 0
             RegisterScriptCallback(modes[mode]["call"][1], this[modes[mode]["call"][1]])
             UnregisterScriptCallback(modes[mode]["call"][2], this[modes[mode]["call"][2]])
         end
     end
 
-    pos = ActorMenu.get_maingame().m_ui_hud_states.m_ui_weapon_cur_ammo:GetWndPos()
-    pos.x = ((hide_counter and pos.x > 0) or ((not hide_counter) and pos.x < 0)) and (-1 * pos.x) or pos.x
-    ActorMenu.get_maingame().m_ui_hud_states.m_ui_weapon_cur_ammo:SetWndPos(pos)
+    -- Update colors based on intensity
+    update_colors()
+    
+    -- Update HUD elements (cached access)
+    local hud_states = ActorMenu.get_maingame().m_ui_hud_states
+    local ammo_counter = hud_states.m_ui_weapon_cur_ammo
+    local ammo_icon = hud_states.m_ui_weapon_icon
 
-    pos = ActorMenu.get_maingame().m_ui_hud_states.m_ui_weapon_icon:GetWndPos()
+    local pos = ammo_counter:GetWndPos()
+    pos.x = ((hide_counter and pos.x > 0) or ((not hide_counter) and pos.x < 0)) and (-1 * pos.x) or pos.x
+    ammo_counter:SetWndPos(pos)
+
+    pos = ammo_icon:GetWndPos()
     pos.x = ((hide_ammo_icon and pos.x > 0) or ((not hide_ammo_icon) and pos.x < 0)) and (-1 * pos.x) or pos.x
-    ActorMenu.get_maingame().m_ui_hud_states.m_ui_weapon_icon:SetWndPos(pos)
+    ammo_icon:SetWndPos(pos)
+    
+    print_dbg("Options updated - display_mode: %s, color_intensity: %s, msg_duration: %s", display_mode, color_intensity, msg_duration)
 end
 
--- Main function --
-function checkAmmo() end --crash prevention for dirty updates.
+-- Legacy function name for compatibility --
+function checkAmmo() end
 
-function check_Ammo()
-    local weapon = db.actor:active_item()
-
-    -- ends if no weapon is in hand etc.
-    if (weapon == nil or (not IsWeapon(weapon)) or IsItem("fake_ammo_wpn", nil, weapon)) then
-        return
-    end
+-- Silent ammo check (no weapon hide animation) - used for auto-check after reload --
+function check_Ammo_silent()
+    local actor = db.actor
+    if not actor then return end
+    
+    local weapon = actor:active_item()
+    if not weapon then return end
+    if not IsWeapon(weapon) then return end
+    if IsItem("fake_ammo_wpn", nil, weapon) then return end
 
     local weaponId = weapon:id()
+    local sec = weapon:section()
+    local in_grenade_mode = weapon:weapon_in_grenade_mode()
+    
+    if in_grenade_mode and not check_grenade_mode then return end
+
+    local currentAmmo = weapon:get_ammo_in_magazine()
+    if not currentAmmo then return end
 
     local message = ""
     local clr = nil
-
-    local currentState = weapon:get_state()
-    if not (currentState == 0 or weapon:weapon_in_grenade_mode()) then
-        return
-    end
-
-    -- if magazine weapon
-    local currentAmmo = weapon:get_ammo_in_magazine()
-    if (currentAmmo == nil) then
-        return
-    end
-
-    local sec = weapon:section()
-
     local mag_data = get_mag_loaded(weaponId)
 
-    -- empty/gl use cases
-    if (is_jammed_weapon(weapon)) then
+    -- Determine weapon status and message
+    if is_jammed_weapon(weapon) then
         message = gc("st_ac_jammed")
         clr = use_clr and clr00_Red or nil
-    elseif weapon:weapon_in_grenade_mode() then
+        
+    elseif in_grenade_mode then
         message = currentAmmo == 1 and gc("st_ac_grenade") or gc("st_ac_empty")
-        clr = use_clr and (currentAmmo == 1 and clr06_White or clr00_Red) -- grenade or no grenade that is the question
+        clr = use_clr and (currentAmmo == 1 and clr06_White or clr00_Red) or nil
+        
     elseif currentAmmo == 0 then
         if is_supported_weapon(sec) and not mag_data then
             message = gc("st_ac_noMag")
-            clr = use_clr and clr00_Red or nil
-			no_mag_check = true
         else
             message = gc("st_ac_empty")
-            clr = use_clr and clr00_Red or nil
         end
+        clr = use_clr and clr00_Red or nil
+        
     else
         local top_round = nil
         local max_ammo = 0
 
         if not mag_data and is_supported_weapon(sec) then
-            -- some random crap to force it to say oitc
             currentAmmo = 1
             max_ammo = 10
-        elseif is_supported_weapon(sec) then
-            print_dbg("checking for section %s", mag_data.section)
+        elseif is_supported_weapon(sec) and mag_data then
             max_ammo = SYS_GetParam(2, mag_data.section, "max_mag_size")
-            top_round = magazines_mcm.get_config("retain_round") and mag_data.loaded[#mag_data.loaded - 1] or stack.peek(mag_data.loaded)
+            top_round = magazines_mcm and magazines_mcm.get_config("retain_round") and mag_data.loaded[#mag_data.loaded - 1] or stack.peek(mag_data.loaded)
         else
             top_round = get_sec_chambered(weapon)
-            local cwpn = weapon:cast_Weapon()
-            max_ammo = cwpn and cwpn:GetAmmoMagSize() or 0
+            max_ammo = SYS_GetParam(2, sec, "ammo_mag_size")
         end
 
         local curAmmoPerc = currentAmmo / max_ammo
+        local base_mag_size = SYS_GetParam(2, sec, "ammo_mag_size", 0)
 
         if currentAmmo == max_ammo + 1 then
-            message = gc("st_ac_plus1")
-            clr = use_clr and clr06_White -- fullest
-        elseif (curAmmoPerc > 1) then
-            message = gc("st_ac_overfull")
-            clr = clrEE_Purple -- always colored this is an error.
-        elseif (currentAmmo == 1 and SYS_GetParam(2, sec, "ammo_mag_size", 0) == 2) then
-            message = gc("st_ac_just_one")
-            clr = use_clr and clr03_Amber -- last shell in double-barreled shotty
+            message = format_ammo_message("st_ac_plus1", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
+            clr = use_clr and clr06_White or nil
+        elseif curAmmoPerc > 1 then
+            message = format_ammo_message("st_ac_overfull", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
+            clr = clrEE_Purple
+        elseif currentAmmo == 1 and base_mag_size == 2 then
+            message = format_ammo_message("st_ac_just_one", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
+            clr = use_clr and clr03_Amber or nil
         elseif currentAmmo == 1 and not mag_data and is_supported_weapon(sec) then
-            message = gc("st_ac_oitc")
-            clr = use_clr and clr00_Red -- last round in the chamber with no maggie
-			no_mag_check = true
+            message = format_ammo_message("st_ac_oitc", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
+            clr = use_clr and clr00_Red or nil
         else
-            idx = l_round((curAmmoPerc * 10) + .5) -- gives an integer value n for the decile of curAmmoPerc and 11 for full.
-            print_dbg("IDX is %s %s %s %s", idx, curAmmoPerc, currentAmmo, max_ammo)
-            message = messages[idx] and gc(messages[idx].m) or "Error!"
-            clr = use_clr and messages[idx] and messages[idx].c or nil
+            local idx = clamp(l_round((curAmmoPerc * 10) + 0.5), 1, #messages)
+            message = format_ammo_message(messages[idx].m, currentAmmo, max_ammo, top_round)
+            clr = use_clr and messages[idx].c or nil
+        end
+    end
+
+    -- Display message directly without animation
+    ac_display_message(message, clr)
+end
+
+-- Main ammo check function --
+function check_Ammo(skip_animation)
+    local actor = db.actor
+    if not actor then return end
+    
+    local weapon = actor:active_item()
+    
+    -- Validation checks with early returns
+    if not weapon then return end
+    if not IsWeapon(weapon) then return end
+    if IsItem("fake_ammo_wpn", nil, weapon) then return end
+
+    local weaponId = weapon:id()
+    local sec = weapon:section()
+    local currentState = weapon:get_state()
+    local in_grenade_mode = weapon:weapon_in_grenade_mode()
+    
+    -- State validation
+    if currentState ~= 0 then return end
+    if in_grenade_mode and not check_grenade_mode then return end
+
+    local currentAmmo = weapon:get_ammo_in_magazine()
+    if not currentAmmo then return end
+
+    local message = ""
+    local clr = nil
+    local mag_data = get_mag_loaded(weaponId)
+
+    -- Determine weapon status and message
+    if is_jammed_weapon(weapon) then
+        message = gc("st_ac_jammed")
+        clr = use_clr and clr00_Red or nil
+        
+    elseif in_grenade_mode then
+        message = currentAmmo == 1 and gc("st_ac_grenade") or gc("st_ac_empty")
+        clr = use_clr and (currentAmmo == 1 and clr06_White or clr00_Red) or nil
+        
+    elseif currentAmmo == 0 then
+        if is_supported_weapon(sec) and not mag_data then
+            message = gc("st_ac_noMag")
+        else
+            message = gc("st_ac_empty")
+        end
+        clr = use_clr and clr00_Red or nil
+        
+    else
+        local top_round = nil
+        local max_ammo = 0
+
+        if not mag_data and is_supported_weapon(sec) then
+            -- One in the chamber, no magazine
+            currentAmmo = 1
+            max_ammo = 10
+        elseif is_supported_weapon(sec) and mag_data then
+            print_dbg("Checking magazine section: %s", mag_data.section)
+            max_ammo = SYS_GetParam(2, mag_data.section, "max_mag_size")
+            top_round = magazines_mcm and magazines_mcm.get_config("retain_round") and mag_data.loaded[#mag_data.loaded - 1] or stack.peek(mag_data.loaded)
+        else
+            top_round = get_sec_chambered(weapon)
+            max_ammo = SYS_GetParam(2, sec, "ammo_mag_size")
         end
 
-        if curAmmoPerc > 0 and top_round then
-            message = message .. ", " .. gc(ui_item.get_sec_short_name(top_round))
+        local curAmmoPerc = currentAmmo / max_ammo
+        local base_mag_size = SYS_GetParam(2, sec, "ammo_mag_size", 0)
+
+        if currentAmmo == max_ammo + 1 then
+            message = format_ammo_message("st_ac_plus1", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
+            clr = use_clr and clr06_White or nil
+            
+        elseif curAmmoPerc > 1 then
+            message = format_ammo_message("st_ac_overfull", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
+            clr = clrEE_Purple -- Always colored - this is an error state
+            
+        elseif currentAmmo == 1 and base_mag_size == 2 then
+            message = format_ammo_message("st_ac_just_one", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
+            clr = use_clr and clr03_Amber or nil
+            
+        elseif currentAmmo == 1 and not mag_data and is_supported_weapon(sec) then
+            message = format_ammo_message("st_ac_oitc", currentAmmo, max_ammo, show_ammo_type and top_round or nil)
+            clr = use_clr and clr00_Red or nil
+            
+        else
+            -- Calculate index with bounds clamping
+            local idx = clamp(l_round((curAmmoPerc * 10) + 0.5), 1, #messages)
+            print_dbg("Ammo index: %s (%.1f%%, %d/%d)", idx, curAmmoPerc * 100, currentAmmo, max_ammo)
+            
+            message = format_ammo_message(messages[idx].m, currentAmmo, max_ammo, top_round)
+            clr = use_clr and messages[idx].c or nil
         end
     end
 
     disable_info("sleep_active")
 
-    if not busy_hands_fix then
-		local anm_ammo_check = get_hud_val(weapon, "anm_ammo_check") 
-		if anm_ammo_check then
-            -- moved to another  func for tidy
-            anim_ammo_check(weapon, message, no_mag_check)
-		else
-			local slot = db.actor:active_slot()
-			db.actor:activate_slot(0)
-			weapon_hidden = true
-			CreateTimeEvent("ammo_check", "restore Weapon", 0, function(slot)
-				if db.actor:active_item() then
-					return false
-				end
-				if not weapon_hidden then
-					db.actor:activate_slot(slot)
-					weapon_hidden = false
-					return true
-				end
-				actor_menu.set_msg(1, message, 2, clr)
-				db.actor:activate_slot(slot)
+    -- Store message/color in globals for TimeEvent access
+    ac_pending_message = message
+    ac_pending_clr = clr
 
-				return true
-			end, slot)
-		end
-    else
-        CreateTimeEvent("ammo_check", "message delay", 1.5, function()
-            actor_menu.set_msg(1, message, 2, clr)
+    -- Display the message
+    if skip_animation or busy_hands_fix then
+        local delay = skip_animation and 0 or busy_hands_delay
+        CreateTimeEvent("ammo_check", "message_delay", delay, function()
+            ac_display_message(ac_pending_message, ac_pending_clr)
             return true
         end)
-    end
-
-end
-
-function get_hud_val(wpn, key)
-    local hud = SYS_GetParam(0, wpn:section(), "hud")
-    if hud then
-        return SYS_GetParam(0, hud, key)
-    end
-end
-
-function anim_ammo_check(weapon, message, no_mag_check)
-
-    if do_ammo_check_anim then return end -- If an ammo check is already happening, don't do anything
-			
-    local anm_no_mag_check = get_hud_val(weapon, "anm_ammo_check_no_mag")
-    if no_mag_check and (not anm_no_mag_check) then -- if trying to mag check with no mag in gun and there's no "no_mag_check" animation it immediately shows the ammo message without animation
-        message_delay = 0
     else
-        message_delay = 1.5
+        local slot = actor:active_slot()
+        actor:activate_slot(0)
+        weapon_hidden = true
         
-        if GAME_VERSION ~= "1.5.1" then -- if using 1.5.2 or newer: use actor_on_hud_animation_play callback to catch state switch and play the mag check animation
-            do_ammo_check_anim = 1
-            weapon:switch_state(4)
-        else
-            local anm_check_empty = get_hud_val(weapon, "anm_ammo_check_empty")
-
-            if no_mag_check and anm_no_mag_check then
-                weapon:play_hud_motion("anm_ammo_check_no_mag", true, 0, 1, 0)
-                local snd_no_mag_check = SYS_GetParam(0, weapon:section() ,"snd_ammo_check_no_mag")
-                if snd_no_mag_check then
-                    utils_obj.play_sound(snd_no_mag_check)
-                end
-            elseif anm_check_empty and weapon:get_ammo_in_magazine() == 0 then
-                weapon:play_hud_motion("anm_ammo_check_empty", true, 0, 1, 0)
-                local snd_ammo_check_empty = SYS_GetParam(0, weapon:section() ,"snd_ammo_check_empty")
-                if snd_ammo_check_empty then
-                    utils_obj.play_sound(snd_ammo_check_empty)
-                end
-            else
-                weapon:play_hud_motion("anm_ammo_check", true, 0, 1, 0)
-                local snd_ammo_check = SYS_GetParam(0, weapon:section() ,"snd_ammo_check")
-                if snd_ammo_check then
-                    utils_obj.play_sound(snd_ammo_check)
-                end
+        CreateTimeEvent("ammo_check", "restore_weapon", 0, function(s)
+            if db.actor:active_item() then
+                return false
             end
-            do_ammo_check_anim = 2
-        end
+            if not weapon_hidden then
+                db.actor:activate_slot(s)
+                weapon_hidden = false
+                return true
+            end
+            ac_display_message(ac_pending_message, ac_pending_clr)
+            db.actor:activate_slot(s)
+            return true
+        end, slot)
     end
-    
-    CreateTimeEvent("ammo_check", "message delay", message_delay, function()
-        actor_menu.set_msg(1, message, 2, clr)
-        return true
-    end)
-    CreateTimeEvent("ammo_check", "ammo check reset", message_delay + 1.5, function() 
-        do_ammo_check_anim = nil
-        no_mag_check = nil
-        return true
-    end)
 end
 
+-- News system with deduplication --
 local old_news = {}
 
 function give_news(message)
     if old_news[message] then return end
-
     old_news[message] = true
 
     print_dbg(message)
     if db.actor then
         db.actor:give_game_news("AmmoCheck", message, "ui_inGame2_D_Ohotnik_na_mutantov", 0, 5000, 0)
     end
-end
-
-local valid_anms = {
-	anm_idle = true,
-	anm_idle_empty = true,
-	anm_idle_aim = true,
-	anm_idle_aim_moving = true,
-	anm_idle_aim_moving_crouch = true,
-	anm_idle_moving = true,
-	anm_idle_sprint = true,
-	anm_idle_aim_empty = true,
-	anm_idle_aim_moving_crouch_empty = true,
-	anm_idle_aim_moving_empty = true,
-	anm_idle_moving_crouch_empty = true,
-	anm_idle_moving_empty = true,
-	anm_idle_sprint_empty = true,
-	anm_bore = true,
-	anm_bore_empty = true,
-    anm_idle_g = true,
-    anm_idle_w_gl = true
-}
-
-function actor_on_hud_animation_play(anim_table, obj)
-	if valid_anms[anim_table.anm_name] and do_ammo_check_anim == 1 then -- Catch the weapon state switch and do the ammo check animation instead
-		anim_table.anm_speed = 1 -- Assume that the ammo check animation doesn't have a speed set in the ltx
-		
-        local anm_no_mag_check = get_hud_val(obj, "anm_ammo_check_no_mag")
-        local anm_check_empty = get_hud_val(obj, "anm_ammo_check_empty")
-
-		if no_mag_check and anm_no_mag_check then
-			anim_table.anm_name = "anm_ammo_check_no_mag"
-
-			local snd_no_mag_check = SYS_GetParam(0, obj:section() ,"snd_ammo_check_no_mag")
-			if snd_no_mag_check then
-				utils_obj.play_sound(snd_no_mag_check)
-			end
-		elseif anm_check_empty and obj:get_ammo_in_magazine() == 0 then
-			anim_table.anm_name = "anm_ammo_check_empty"
-			
-			local snd_ammo_check_empty = SYS_GetParam(0, obj:section() ,"snd_ammo_check_empty")
-			if snd_ammo_check_empty then
-				utils_obj.play_sound(snd_ammo_check_empty)
-			end
-		else
-			anim_table.anm_name = "anm_ammo_check"
-			
-			local snd_ammo_check = SYS_GetParam(0, obj:section() ,"snd_ammo_check")
-			if snd_ammo_check then
-				utils_obj.play_sound(snd_ammo_check)
-			end
-		end
-		
-		do_ammo_check_anim = 2
-	end
 end

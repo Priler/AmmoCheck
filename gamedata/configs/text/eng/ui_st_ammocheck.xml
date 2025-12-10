@@ -49,34 +49,144 @@
     <string id="st_ac_ammoLeft">
         <text>left</text>
     </string>
+    <string id="st_ac_magsredux_update">
+        <text>You are using an older version of MagsRedux. Update to Github version for best experience.</text>
+    </string>
+
+    <!-- MCM Menu Header -->
     <string id="ui_mcm_menu_rax_ammo_check">
         <text>Ammo Check</text>
     </string>
     <string id="ui_mm_title_rax_ammo_check">
         <text>Ammo Check</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_usecolor">
-        <text>Color messages.</text>
+
+    <!-- Section Titles -->
+    <string id="ui_mcm_rax_ammo_check_title_display">
+        <text>Display Settings</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_title_hud">
+        <text>HUD Settings</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_title_behavior">
+        <text>Behavior Settings</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_title_anim">
+        <text>Animation Settings</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_title_keys">
+        <text>Keybind Settings</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_title_debug">
+        <text>Debug Settings</text>
+    </string>
+
+    <!-- Display Settings -->
+    <string id="ui_mcm_rax_ammo_check_usecolor">
+        <text>Colored Messages</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_usecolor_desc">
+        <text>Enable color-coded messages based on ammo level (red = low, white = full).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_color_intensity">
+        <text>Color Intensity</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_color_intensity_desc">
+        <text>Adjust the brightness of colored messages. Lower values produce dimmer colors.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_mode">
+        <text>Display Mode</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_mode_desc">
+        <text>Choose how ammo count is displayed: text description, numeric count, or both.</text>
+    </string>
+    <!-- Display Mode List Options (no ui_mcm_ prefix for list values) -->
+    <string id="rax_ammo_check_display_mode_lst_dm_text">
+        <text>Text Only</text>
+    </string>
+    <string id="rax_ammo_check_display_mode_lst_dm_numeric">
+        <text>Numeric Only</text>
+    </string>
+    <string id="rax_ammo_check_display_mode_lst_dm_both">
+        <text>Text + Numeric</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_show_ammo_type">
+        <text>Show Ammo Type</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_show_ammo_type_desc">
+        <text>Append the current ammo type name to the status message.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_highlight_ammo_type">
+        <text>Show Ammo Type Tag</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_highlight_ammo_type_desc">
+        <text>Append ammo type classification tag to the name (e.g. [AP], [HP], [FMJ], [SL] for slug, [BK] for buckshot).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_msg_duration">
+        <text>Message Duration</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_msg_duration_desc">
+        <text>How long the ammo status message stays on screen (in seconds).</text>
+    </string>
+
+    <!-- HUD Settings -->
     <string id="ui_mcm_rax_ammo_check_hidecounter">
-        <text>Hide Ammo Counter.</text>
+        <text>Hide Ammo Counter</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hidecounter_desc">
+        <text>Hide the default HUD ammo counter for a more immersive experience.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_hideicon">
-        <text>Hide Ammo Icon.</text>
+        <text>Hide Ammo Icon</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_hideicon_desc">
+        <text>Hide the ammo type icon from the HUD.</text>
+    </string>
+
+    <!-- Behavior Settings -->
+    <string id="ui_mcm_rax_ammo_check_check_grenade_mode">
+        <text>Check in Grenade Mode</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_check_grenade_mode_desc">
+        <text>Allow ammo checking while the weapon is in grenade launcher mode.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_auto_check_reload">
+        <text>Auto-Check After Reload</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_auto_check_reload_desc">
+        <text>Automatically display ammo status after completing a reload.</text>
+    </string>
+
+    <!-- Animation Settings -->
     <string id="ui_mcm_rax_ammo_check_busy_hands_fix">
-        <text>Busy Hands Fix.</text>
+        <text>Busy Hands Fix</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_busy_hands_fix_desc">
-        <text>Check this box if the Ammo Check "animation" gets stuck. Likely to occur when FDDA is installed</text>
+        <text>Enable if the ammo check animation gets stuck. Likely needed when FDDA is installed.</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_busy_hands_delay">
+        <text>Message Delay</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_busy_hands_delay_desc">
+        <text>Delay before showing the message when Busy Hands Fix is enabled (in seconds).</text>
+    </string>
+
+    <!-- Keybind Settings -->
     <string id="ui_mcm_rax_ammo_check_keybind">
-        <text>Ammo Check key.</text>
+        <text>Ammo Check Key</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_keybind_desc">
-        <text>This key bind can be configured to require additional modifier keys to mitigate conflicts.</text>
+        <text>Key to press for checking ammo. Can be combined with modifier keys.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_update_mcm">
-        <text>Update MCM to change key bind here. Key defaults to T.</text>
+        <text>Update MCM to change keybind here. Key defaults to T.</text>
+    </string>
+
+    <!-- Debug Settings -->
+    <string id="ui_mcm_rax_ammo_check_debug_mode">
+        <text>Debug Mode</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_debug_mode_desc">
+        <text>Enable debug logging for troubleshooting (independent of MCM global debug setting).</text>
     </string>
 </string_table>
