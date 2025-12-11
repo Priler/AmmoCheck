@@ -26,8 +26,6 @@
 	- etc.
 ]]
 
-
-
 -- Cached globals for performance --
 local math_floor = math.floor
 local math_min = math.min
@@ -229,6 +227,24 @@ get_mag_loaded = null_function
 is_supported_weapon = null_function
 is_jammed_weapon = null_function
 get_sec_chambered = null_function
+
+-- Get current ammo section for vanilla (non-MagsRedux) weapons --
+local function get_vanilla_ammo_section(weapon)
+    if not weapon then return nil end
+    local sec = weapon:section()
+    local ammo_class = SYS_GetParam(0, sec, "ammo_class")
+    if not ammo_class then return nil end
+    
+    -- Get current ammo type index (0-based)
+    local ammo_type_idx = weapon:get_ammo_type()
+    
+    -- Parse comma-separated ammo list
+    local ammo_list = str_explode(ammo_class, ",")
+    if not ammo_list or #ammo_list == 0 then return nil end
+    
+    -- Return the ammo section at current index (convert to 1-based)
+    return ammo_list[ammo_type_idx + 1]
+end
 
 -- Keybind system --
 local mcm_keybinds = ui_mcm and ui_mcm.key_hold
@@ -649,8 +665,12 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
                 tag_round = display_round
             end
         else
-            -- Non-MagsRedux weapon
+            -- Non-MagsRedux weapon: get ammo section from weapon's ammo_class list
             display_round = get_sec_chambered(weapon)
+            -- Fallback to vanilla method if MagsRedux function returned nil
+            if not display_round then
+                display_round = get_vanilla_ammo_section(weapon)
+            end
             tag_round = display_round
             max_ammo = base_mag_size
         end
