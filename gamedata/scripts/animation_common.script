@@ -1,0 +1,402 @@
+--[[
+    Animation Common - Shared animation utilities and mutator system
+    
+    This script provides a centralized system for:
+    - Animation mutators (ordered list of functions that can modify animations)
+    - Custom animation sounds with configurable volume
+    - Animation flags for state tracking
+    
+    The mutator system ensures consistent callback order since engine callback 
+    order is random between scripts.
+
+    Originally taken from "OneKeyReload" mod.
+
+    Rewritten by: Abraham (Priler)
+    Enhanced from: 2025.12.10
+    Repository: https://github.com/Priler/AmmoCheck
+]]
+
+
+
+-- ============================================
+-- Animation Flags System
+-- Track animation states across scripts
+-- ============================================
+
+FLAGS = {}
+local active_flags = {}
+
+function get_flag(flag)
+    return active_flags[flag]
+end
+
+function set_flag(flag)
+    active_flags[flag] = true
+end
+
+function remove_flag(flag)
+    active_flags[flag] = nil
+end
+
+function add_flag(flag)
+    if FLAGS[flag] then return end
+    FLAGS[flag] = #FLAGS + 1
+end
+
+function clear_all_flags()
+    active_flags = {}
+end
+
+-- ============================================
+-- Animation Mutator System
+-- Ordered list of functions that can modify animation tables
+-- ============================================
+
+local anim_mutators = {}
+
+--[[
+    Register an animation mutator function.
+    
+    @param functor (function) - Function to call, signature: function(anm_table, item) -> bool
+                               Return true to stop processing further mutators
+    @param priority (number) - Lower priority = earlier execution (default: 10)
+    @param condition (function|nil) - Optional condition function: function(anm_table, item) -> bool
+                                      Mutator only runs if condition returns true
+    @param id (string|nil) - Optional unique identifier for this mutator (for removal/replacement)
+    
+    @return (boolean) - True if registered successfully
+]]
+function add_anim_mutator(functor, priority, condition, id)
+    -- Validate functor
+    if not functor then
+        printf("![AnimCommon] ERROR: add_anim_mutator called with nil functor")
+        return false
+    end
+    
+    if type(functor) ~= "function" then
+        printf("![AnimCommon] ERROR: add_anim_mutator functor must be a function, got %s", type(functor))
+        return false
+    end
+    
+    -- Set defaults
+    priority = priority or 10
+    
+    -- Validate condition if provided
+    if condition and type(condition) ~= "function" then
+        printf("![AnimCommon] WARNING: condition must be a function, ignoring")
+        condition = nil
+    end
+    
+    -- Check for duplicate ID and replace if exists
+    if id then
+        for i, mutator in ipairs(anim_mutators) do
+            if mutator.id == id then
+                anim_mutators[i] = {
+                    functor = functor,
+                    priority = priority,
+                    condition = condition,
+                    id = id
+                }
+                table.sort(anim_mutators, function(a, b) return a.priority < b.priority end)
+                return true
+            end
+        end
+    end
+    
+    -- Add new mutator
+    table.insert(anim_mutators, {
+        functor = functor,
+        priority = priority,
+        condition = condition,
+        id = id
+    })
+    
+    -- Sort by priority (lower = earlier)
+    table.sort(anim_mutators, function(a, b) return a.priority < b.priority end)
+    
+    return true
+end
+
+--[[
+    Remove a mutator by its ID.
+    
+    @param id (string) - The ID of the mutator to remove
+    @return (boolean) - True if removed, false if not found
+]]
+function remove_anim_mutator(id)
+    if not id then return false end
+    
+    for i, mutator in ipairs(anim_mutators) do
+        if mutator.id == id then
+            table.remove(anim_mutators, i)
+            return true
+        end
+    end
+    return false
+end
+
+--[[
+    Get list of registered mutator IDs (for debugging).
+    
+    @return (table) - Array of {id, priority} tables
+]]
+function get_mutator_list()
+    local list = {}
+    for _, mutator in ipairs(anim_mutators) do
+        table.insert(list, {
+            id = mutator.id or "(anonymous)",
+            priority = mutator.priority
+        })
+    end
+    return list
+end
+
+-- ============================================
+-- Animation Utilities
+-- ============================================
+
+--[[
+    Check if a weapon section has a specific HUD animation.
+    
+    @param section (string) - Weapon section name
+    @param anm (string) - Animation name to check for
+    @return (string|nil) - Animation value if exists, nil otherwise
+]]
+function has_animation(section, anm)
+    local hud_section = ini_sys:r_string_ex(section, "hud") or section
+    return SYS_GetParam(0, hud_section, anm)
+end
+
+--[[
+    Try to mutate animation by adding a suffix.
+    
+    @param anm_table (table) - Animation table to modify
+    @param anm_suffix (string) - Suffix to append
+    @param section (string) - Weapon section
+    @return (boolean) - True if mutation succeeded
+]]
+function mutate_anim(anm_table, anm_suffix, section)
+    local new_anm = anm_table.anm_name .. anm_suffix
+    if has_animation(section, new_anm) then
+        anm_table.anm_name = new_anm
+        return true
+    end
+    return false
+end
+
+-- ============================================
+-- Sound System
+-- Custom animation sounds with volume support
+-- ============================================
+
+local sound_object_by_sec_by_path = {}
+local default_sound_volume = 1.0
+
+--[[
+    Get or create a sound object for a given path and section.
+    Caches sound objects to avoid recreation.
+    
+    @param path (string) - Path to sound file
+    @param sec (string) - Item section (for caching)
+    @return (sound_object|nil) - The sound object or nil on error
+]]
+function get_safe_sound_object(path, sec)
+    if not path then
+        printf("![AnimCommon] ERROR: get_safe_sound_object - path is nil")
+        return nil
+    end
+    if not sec then
+        printf("![AnimCommon] ERROR: get_safe_sound_object - section is nil")
+        return nil
+    end
+    
+    -- Initialize cache for section if needed
+    if not sound_object_by_sec_by_path[sec] then
+        sound_object_by_sec_by_path[sec] = {}
+    end
+    
+    -- Return cached object if exists
+    if sound_object_by_sec_by_path[sec][path] then
+        return sound_object_by_sec_by_path[sec][path]
+    end
+    
+    -- Create new sound object
+    local snd_obj = sound_object(path)
+    if snd_obj then
+        sound_object_by_sec_by_path[sec][path] = snd_obj
+    end
+    
+    return snd_obj
+end
+
+--[[
+    Stop all playing sounds for a given section.
+    
+    @param sec (string) - Item section
+]]
+function stop_all_sound_object(sec)
+    if not sec then return end
+    
+    local section_sounds = sound_object_by_sec_by_path[sec]
+    if not section_sounds then return end
+    
+    for path, snd_obj in pairs(section_sounds) do
+        if snd_obj and snd_obj:playing() then
+            snd_obj:stop()
+        end
+    end
+    
+    sound_object_by_sec_by_path[sec] = nil
+end
+
+--[[
+    Clear all cached sound objects.
+]]
+function clear_sound_cache()
+    for sec, sounds in pairs(sound_object_by_sec_by_path) do
+        for path, snd_obj in pairs(sounds) do
+            if snd_obj and snd_obj:playing() then
+                snd_obj:stop()
+            end
+        end
+    end
+    sound_object_by_sec_by_path = {}
+end
+
+--[[
+    Set the global sound volume multiplier.
+    
+    @param volume (number) - Volume multiplier 0.0-1.0
+]]
+function set_sound_volume(volume)
+    if volume and type(volume) == "number" then
+        default_sound_volume = math.max(0.0, math.min(1.0, volume))
+    end
+end
+
+--[[
+    Get the current global sound volume multiplier.
+    
+    @return (number) - Current volume multiplier
+]]
+function get_sound_volume()
+    return default_sound_volume
+end
+
+--[[
+    Get sound parameter name from animation name.
+    
+    @param anm_name (string) - Animation name (e.g., "anm_reload")
+    @return (string) - Sound parameter name (e.g., "scripted_snd_reload")
+]]
+function get_sound_from_anm(anm_name)
+    return anm_name:gsub("anm_", "scripted_snd_")
+end
+
+--[[
+    Parse sound value from config.
+    Config format: "path/to/sound, volume, never_cancel"
+    - volume: 0.0-1.0 (optional, default 1.0)
+    - never_cancel: any value = don't cancel on new sound (optional)
+    
+    @param snd_value (string) - Raw config value
+    @return (string, number, boolean) - path, volume, never_cancel
+]]
+local function parse_sound_config(snd_value)
+    if not snd_value then return nil, default_sound_volume, false end
+    
+    local parts = str_explode(snd_value, ",")
+    local path = parts[1]
+    local volume = tonumber(parts[2]) or default_sound_volume
+    local never_cancel = parts[3] ~= nil
+    
+    -- Clamp volume to valid range
+    volume = math.max(0.0, math.min(1.0, volume))
+    
+    return path, volume, never_cancel
+end
+
+-- ============================================
+-- Main Animation Callback
+-- ============================================
+
+function actor_on_hud_animation_play(anm_table, item)
+    if not item then return end
+    
+    local section = item:section()
+    
+    -- Stop any playing sounds for this item
+    stop_all_sound_object(section)
+    
+    -- Execute mutators in priority order
+    for i, mutator in ipairs(anim_mutators) do
+        -- Check condition if one exists
+        local should_run = true
+        if mutator.condition then
+            local ok, result = pcall(mutator.condition, anm_table, item)
+            if not ok then
+                printf("![AnimCommon] ERROR in mutator condition '%s': %s", 
+                    mutator.id or "(anonymous)", tostring(result))
+                should_run = false
+            else
+                should_run = result
+            end
+        end
+        
+        -- Run the mutator if condition passed
+        if should_run and mutator.functor then
+            local ok, stop = pcall(mutator.functor, anm_table, item)
+            if not ok then
+                printf("![AnimCommon] ERROR in mutator '%s': %s", 
+                    mutator.id or "(anonymous)", tostring(stop))
+            elseif stop then
+                break  -- Stop processing further mutators
+            end
+        end
+    end
+    
+    -- Handle custom animation sounds
+    local anm_name = anm_table.anm_name
+    local snd_name = get_sound_from_anm(anm_name)
+    
+    -- Try scripted_snd_ first, then fall back to snd_
+    local snd_value = SYS_GetParam(0, section, snd_name)
+    if not snd_value then
+        snd_name = snd_name:gsub("scripted_snd_", "snd_")
+        snd_value = SYS_GetParam(0, section, snd_name)
+        
+        -- Skip snd_close (handled by engine)
+        if snd_name == "snd_close" then return end
+        if not snd_value then return end
+    end
+    
+    -- Parse sound config (path, volume, never_cancel)
+    local snd_path, config_volume, never_cancel = parse_sound_config(snd_value)
+    if not snd_path then return end
+    
+    -- Apply global volume multiplier
+    local final_volume = config_volume * default_sound_volume
+    
+    -- Get or create sound object
+    local snd_obj = get_safe_sound_object(snd_path, section)
+    if not snd_obj then return end
+    
+    -- Play the sound with volume control
+    -- Use play_no_feedback for volume support, use play for cancellable sounds
+    if never_cancel then
+        -- play_no_feedback: won't be cancelled by other sounds
+        snd_obj:play_no_feedback(db.actor, sound_object.s2d, 0, vector(), final_volume, 1.0)
+    else
+        -- Use play_no_feedback for volume control even on cancellable sounds
+        -- The stop_all_sound_object call at the start handles cancellation
+        snd_obj:play_no_feedback(db.actor, sound_object.s2d, 0, vector(), final_volume, 1.0)
+    end
+end
+
+-- ============================================
+-- Initialization
+-- ============================================
+
+function on_game_start()
+    RegisterScriptCallback("actor_on_hud_animation_play", actor_on_hud_animation_play)
+end

@@ -49,6 +49,9 @@
     <string id="st_ac_grenade">
         <text>Grenade loaded</text>
     </string>
+    <string id="st_ac_loaded">
+        <text>Loaded</text>
+    </string>
     <string id="st_ac_noAmmo">
         <text>This doesn't take ammo!</text>
     </string>
@@ -180,23 +183,78 @@
     </string>
 
     <!-- Animation Settings -->
-    <string id="ui_mcm_rax_ammo_check_busy_hands_fix">
-        <text>Busy Hands Fix</text>
+    <string id="ui_mcm_rax_ammo_check_enable_animations">
+        <text>Enable Animations</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_busy_hands_fix_desc">
-        <text>Enable if the ammo check animation gets stuck. Likely needed when FDDA is installed.</text>
+    <string id="ui_mcm_rax_ammo_check_enable_animations_desc">
+        <text>Master switch for all animations. When OFF, only the text message will be displayed (no weapon animations).</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_alt_mag_inspect">
-        <text>Alternative Mag Inspect</text>
+    <string id="ui_mcm_rax_ammo_check_anim_mode">
+        <text>Alternative Mag Inspect Animation</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_alt_mag_inspect_desc">
-        <text>For weapons without a proper mag inspect animation: instead of hiding and showing the weapon, just lower it (like pressing B). You'll need to raise the weapon manually.</text>
+    <string id="ui_mcm_rax_ammo_check_anim_mode_desc">
+        <text>Animation for weapons WITHOUT proper mag inspect animation. Default: hide/show weapon. Lower Weapon: lower weapon briefly. Fake Reload: play reload animation for magazine weapons, special animations for internal magazine weapons.</text>
+    </string>
+    <!-- Animation Mode List Options -->
+    <string id="rax_ammo_check_anim_mode_lst_anim_mode_default">
+        <text>Default (Hide/Show)</text>
+    </string>
+    <string id="rax_ammo_check_anim_mode_lst_anim_mode_lower">
+        <text>Lower Weapon</text>
+    </string>
+    <string id="rax_ammo_check_anim_mode_lst_anim_mode_fake_reload">
+        <text>Fake Reload</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_no_magazine_fallback">
+        <text>No Magazine Fallback</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_no_magazine_fallback_desc">
+        <text>Animation when using Fake Reload mode and NO magazine is loaded (MagsRedux detachable mag weapons only). Hide/Show: switch weapon. Lower: lower weapon. None: just show message.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_fallback">
+        <text>Internal Mag Fallback</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_fallback_desc">
+        <text>Fallback animation for internal magazine weapons (shotguns, revolvers, etc.) not in special lists when using Fake Reload mode.</text>
+    </string>
+    <string id="rax_ammo_check_no_magazine_fallback_lst_fallback_hide_show">
+        <text>Hide/Show Weapon</text>
+    </string>
+    <string id="rax_ammo_check_no_magazine_fallback_lst_fallback_lower">
+        <text>Lower Weapon</text>
+    </string>
+    <string id="rax_ammo_check_no_magazine_fallback_lst_fallback_none">
+        <text>None (Message Only)</text>
+    </string>
+    <string id="rax_ammo_check_fake_reload_fallback_lst_fallback_hide_show">
+        <text>Hide/Show Weapon</text>
+    </string>
+    <string id="rax_ammo_check_fake_reload_fallback_lst_fallback_lower">
+        <text>Lower Weapon</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_cycle">
+        <text>Bolt-Action: Cycle Bolt</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_cycle_desc">
+        <text>For bolt-action rifles (Kar98, Springfield, etc.) play bolt open/close animation instead of fallback.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_pump_rack">
+        <text>Pump-Action: Rack Slide</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_pump_rack_desc">
+        <text>For pump-action shotguns (KS23, Remington 870, etc.) play pump open/close animation instead of fallback.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_ignore_list">
+        <text>Fake Reload Ignore Some Weapons</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_ignore_list_desc">
+        <text>Use blacklist to skip fake reload animations for weapons with non-immersive or broken animations. Affected weapons will use the fallback animation instead. Edit ammo_check_weapons.script to customize the list.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_busy_hands_delay">
         <text>Message Delay</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_busy_hands_delay_desc">
-        <text>Delay before showing the message when using Alternative Mag Inspect or Busy Hands Fix (in seconds).</text>
+        <text>Delay before showing the message (in seconds).</text>
     </string>
 
     <!-- Keybind Settings -->
@@ -215,6 +273,6 @@
         <text>Debug Mode</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_debug_mode_desc">
-        <text>Enable debug logging for troubleshooting (independent of MCM global debug setting).</text>
+        <text>Enable debug mode for animation testing. When ON: Numpad 0-9 tests weapon states, Numpad * lists weapon animations. Use to discover which state triggers bolt cycling.</text>
     </string>
 </string_table>

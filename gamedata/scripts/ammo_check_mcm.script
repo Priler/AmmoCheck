@@ -4,7 +4,8 @@
 -- Last modified: 2022.08.17
 -- 
 -- Enhanced by: Abraham (Priler)
--- Enhanced on: 2025.12.10
+-- Enhanced from: 2025.12.10
+-- Repository: https://github.com/Priler/AmmoCheck
 -- 
 -- Changes:
 --   - Performance optimizations (cached globals, reduced HUD access calls) * more info below
@@ -17,14 +18,28 @@
 --   - Added configurable busy hands delay
 --   - Added independent debug mode toggle
 --	 - Added additional ammo tags ([FMJ], [AP]), [HP], etc.) + highlight of ammo type/ammo tag (optional)
+--   - Added "fake reload" mag inspect animation (taken & re-written from "OneKeyReload" mod)
+--   - Added custom weapons animation settings (for example, now Toz-34 Chimera Hunter also has a badass ammo check animation)
+--   - Added fake reload exclusion list (Mag Palming, etc. animations will be excluded)
+
+--  @TODO:
+--   - No magazine fallback only works for weapons without mag inspect animation
+--   - (reason: I dunno how to cancel mag inspect animation, as well as how to cancel camera movement animation alongside it)
+--   - (so if anyone know how to do it, write me (issues on GH would be good, or comment on ModDB))
 
 --[[
     Performance optimizations (LUA *magic*):
     - Cached global function lookups for direct access
     - Cache of different things (Ammo type classification, Translation strings, is_supported_weapon results)
     - Shared code where it's possible/required
-	- etc.
+    - Some GC targeted optimizations (as few hot path allocations as possible, as few closures as possible, etc.)
+    ...
+	- etc. idk I hate LUA tbh xD (tf arrays starts with 1)
+    - probably some more extreme perf optimizations could be made
+    - but honestly, I hate GC languages so .. it'll work
 ]]
+
+
 
 -- Cached globals for performance --
 local math_floor = math.floor
@@ -44,13 +59,18 @@ local gc = game.translate_string
 local use_clr = false
 local hide_counter = true
 local hide_ammo_icon = true
-local busy_hands_fix = false
-local alt_mag_inspect = false
+local anim_mode = 0             -- 0: default (hide/show), 1: lower weapon, 2: fake reload
 local mcm_key = DIK_keys.DIK_T
 local msg_duration = 2
 local show_ammo_type = true
 local show_ammo_tag = true
 local busy_hands_delay = 1.5
+local no_magazine_fallback = 1  -- 0: hide/show, 1: lower, 2: none (for Fake Reload mode when no magazine loaded)
+local fake_reload_fallback = 1  -- 0: hide/show, 1: lower (for internal mag weapons)
+local fake_reload_bolt_cycle = true  -- Enable bolt cycle for bolt-action rifles
+local fake_reload_pump_rack = true   -- Enable pump rack for pump-action shotguns
+local fake_reload_ignore_list = true -- Use ignore list for non-immersive fake reloads
+local enable_animations = true       -- Master switch for all animations
 local check_grenade_mode = false
 local display_mode = 0          -- 0: text, 1: numeric, 2: both
 local auto_check_reload = false
@@ -58,9 +78,21 @@ local color_intensity = 100
 local highlight_ammo_mode = 0   -- 0: none, 1: whole message, 2: separate lines
 local debug_mode = false
 
+-- Fake reload animation state --
+local do_ammo_check_anim = nil  -- nil: not active, 1: started, 2: mutator applied
+local wpn_checking = nil        -- Weapon being checked
+local det_active = nil          -- Detector that was active before check
+
+-- Animation timing constants --
+local FAKE_RELOAD_MSG_DELAY = 1.5       -- Delay before showing message after fake reload
+local BOLT_PUMP_MSG_OFFSET = 0.8        -- Additional delay offset for bolt/pump animations
+local AUTO_CHECK_DELAY = 0.15           -- Delay for auto-check after reload
+local RESTORE_DET_DELAY = 0.1           -- Delay before checking to restore detector
+
 -- Caches --
 local ammo_type_cache = {}      -- Cache for ammo type classification
 local translation_cache = {}    -- Cache for translation strings
+local ammo_list_cache = {}      -- Cache for vanilla weapon ammo lists
 
 -- Color definitions --
 local function apply_intensity(color, intensity)
@@ -205,6 +237,11 @@ function null_function()
     return false
 end
 
+-- Separate nil-returning function for get_sec_chambered
+local function nil_function()
+    return nil
+end
+
 local function l_round(value)
     return math_floor(value + 0.5)
 end
@@ -226,24 +263,35 @@ set_data = null_function
 get_mag_loaded = null_function
 is_supported_weapon = null_function
 is_jammed_weapon = null_function
-get_sec_chambered = null_function
+get_sec_chambered = nil_function  -- Must return nil, not false
 
 -- Get current ammo section for vanilla (non-MagsRedux) weapons --
+-- Uses caching to avoid repeated str_explode calls (GC optimization)
 local function get_vanilla_ammo_section(weapon)
     if not weapon then return nil end
     local sec = weapon:section()
-    local ammo_class = SYS_GetParam(0, sec, "ammo_class")
-    if not ammo_class then return nil end
     
-    -- Get current ammo type index (0-based)
+    -- Check cache first
+    local cached_list = ammo_list_cache[sec]
+    if cached_list == false then return nil end  -- Cached "no ammo class"
+    
+    if not cached_list then
+        local ammo_class = SYS_GetParam(0, sec, "ammo_class")
+        if not ammo_class then 
+            ammo_list_cache[sec] = false
+            return nil 
+        end
+        cached_list = str_explode(ammo_class, ",")
+        if not cached_list or #cached_list == 0 then
+            ammo_list_cache[sec] = false
+            return nil
+        end
+        ammo_list_cache[sec] = cached_list
+    end
+    
+    -- Get current ammo type index (0-based) and return section
     local ammo_type_idx = weapon:get_ammo_type()
-    
-    -- Parse comma-separated ammo list
-    local ammo_list = str_explode(ammo_class, ",")
-    if not ammo_list or #ammo_list == 0 then return nil end
-    
-    -- Return the ammo section at current index (convert to 1-based)
-    return ammo_list[ammo_type_idx + 1]
+    return cached_list[ammo_type_idx + 1]
 end
 
 -- Keybind system --
@@ -280,6 +328,33 @@ function on_key_press(key)
     local bind = dik_to_bind(key)
     if weapon_hidden and not direction_keys[bind] then
         weapon_hidden = false
+    end
+
+    -- Debug mode: Numpad keys 0-9 test weapon states
+    if debug_mode then
+        local numpad_states = {
+            [DIK_keys.DIK_NUMPAD0] = 0,
+            [DIK_keys.DIK_NUMPAD1] = 1,
+            [DIK_keys.DIK_NUMPAD2] = 2,
+            [DIK_keys.DIK_NUMPAD3] = 3,
+            [DIK_keys.DIK_NUMPAD4] = 4,
+            [DIK_keys.DIK_NUMPAD5] = 5,
+            [DIK_keys.DIK_NUMPAD6] = 6,
+            [DIK_keys.DIK_NUMPAD7] = 7,
+            [DIK_keys.DIK_NUMPAD8] = 8,
+            [DIK_keys.DIK_NUMPAD9] = 9,
+        }
+        
+        if numpad_states[key] then
+            debug_test_state(numpad_states[key])
+            return
+        end
+        
+        -- Numpad * lists animations
+        if key == DIK_keys.DIK_MULTIPLY then
+            debug_list_animations()
+            return
+        end
     end
 
     if key ~= mcm_key then return end
@@ -394,7 +469,7 @@ local function get_ammo_type_color(ammo_type)
 end
 
 -- Remove duplicate suffix from ammo name if it matches the tag content --
--- e.g., "9x19 HP" + "(HP)" → "9x19"
+-- e.g., "9x19 HP" + "(HP)" ? "9x19"
 local function remove_duplicate_suffix(ammo_name, tag)
     if not ammo_name or not tag then return ammo_name end
     
@@ -646,7 +721,7 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
             has_empty_mag = false
         elseif is_supported and mag_data then
             print_dbg("Checking magazine section: %s", mag_data.section)
-            max_ammo = SYS_GetParam(2, mag_data.section, "max_mag_size")
+            max_ammo = SYS_GetParam(2, mag_data.section, "max_mag_size") or 1
             
             if magazines_mcm and magazines_mcm.get_config("retain_round") then
                 -- With retain_round: last in array is chambered, second-to-last is magazine top
@@ -661,7 +736,13 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
                 end
             else
                 -- Without retain_round: top of stack is what we'll fire next
-                display_round = stack.peek(mag_data.loaded)
+                -- Check if stack module exists (MagsRedux dependency)
+                if stack and stack.peek then
+                    display_round = stack.peek(mag_data.loaded)
+                elseif mag_data.loaded and #mag_data.loaded > 0 then
+                    -- Fallback: get last element directly
+                    display_round = mag_data.loaded[#mag_data.loaded]
+                end
                 tag_round = display_round
             end
         else
@@ -675,6 +756,9 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
             max_ammo = base_mag_size
         end
 
+        -- Guard against division by zero
+        if not max_ammo or max_ammo <= 0 then max_ammo = 1 end
+        
         local curAmmoPerc = currentAmmo / max_ammo
 
         if currentAmmo == max_ammo + 1 then
@@ -742,46 +826,106 @@ end
 -- Auto-check after reload - triggered when HUD animation ends --
 local pending_reload_check = false
 
+-- Pre-defined callback for auto-check after reload (GC optimization)
+local function auto_check_after_reload_callback()
+    local actor = db.actor
+    if not actor then return true end
+    
+    local weapon = actor:active_item()
+    if not weapon or not IsWeapon(weapon) then return true end
+    
+    -- Build and display message directly (no weapon hide animation)
+    check_Ammo_silent()
+    return true
+end
+
+-- Callback for HUD animation end - optimized to avoid GC pressure
+-- Uses case-insensitive pattern matching instead of string_lower
 function actor_on_hud_animation_end(item, section, motion, state, slot)
     if not auto_check_reload then return end
     if not motion then return end
     if not item then return end
     if not IsWeapon(item) then return end
     
-    local motion_lower = string_lower(motion)
+    -- Use case-insensitive pattern matching (avoids creating new string)
+    -- Check reload first (most common case)
+    if string_find(motion, "[Rr]eload") then
+        pending_reload_check = false
+        print_dbg("Reload animation ended: %s", motion)
+        CreateTimeEvent("ammo_check", "auto_check", AUTO_CHECK_DELAY, auto_check_after_reload_callback)
+        return
+    end
     
-    -- Mark that we're in a shotgun reload sequence
-    if string_find(motion_lower, "open") and string_find(motion_lower, "anm") then
+    -- Check for shotgun open animation
+    if string_find(motion, "[Oo]pen") and string_find(motion, "anm") then
         pending_reload_check = true
         print_dbg("Shotgun reload started: %s", motion)
         return
     end
     
-    -- Check for reload completion
-    local is_reload_end = string_find(motion_lower, "reload") or 
-                          (pending_reload_check and string_find(motion_lower, "close"))
-    
-    if is_reload_end then
+    -- Check for shotgun close animation (only if we're tracking a reload)
+    if pending_reload_check and string_find(motion, "[Cc]lose") then
         pending_reload_check = false
-        print_dbg("Reload animation ended: %s", motion)
-        
-        -- Small delay to ensure weapon state is updated, then show message directly
-        CreateTimeEvent("ammo_check", "auto_check", 0.15, function()
-            local actor = db.actor
-            if not actor then return true end
-            
-            local weapon = actor:active_item()
-            if not weapon or not IsWeapon(weapon) then return true end
-            
-            -- Build and display message directly (no weapon hide animation)
-            check_Ammo_silent()
-            return true
-        end)
+        print_dbg("Shotgun reload ended: %s", motion)
+        CreateTimeEvent("ammo_check", "auto_check", AUTO_CHECK_DELAY, auto_check_after_reload_callback)
     end
 end
 
 function actor_on_weapon_jammed(weapon)
     print_dbg("Weapon jammed")
+end
+
+-- ============================================
+-- Animation Mutator for Fake Reload Mode
+-- ============================================
+
+-- Check if weapon has a specific HUD animation --
+local function has_animation(section, anm)
+    local hud_section = SYS_GetParam(0, section, "hud") or section
+    return SYS_GetParam(0, hud_section, anm)
+end
+
+-- Animation mutator for fake reload - intercepts inspect animation --
+local function mag_check_animation(anm_table, obj)
+    -- Handle end of ammo check animation
+    if wpn_checking and obj and wpn_checking:id() == obj:id() and do_ammo_check_anim == 2 then
+        wpn_checking = nil
+        do_ammo_check_anim = nil
+        
+        if det_active then
+            db.actor:show_detector(true)
+        end
+        det_active = nil
+    end
+    
+    -- Handle start of ammo check animation (state 4 = inspect/bore)
+    if do_ammo_check_anim == 1 and obj and obj:get_state() == 4 then
+        wpn_checking = obj
+        local sec = obj:section()
+        
+        local is_supported = is_supported_weapon(sec)
+        local has_mag_data = get_mag_loaded(obj:id())
+        
+        -- Try different ammo check animations
+        -- If none exist, DON'T change the animation - let the default anm_bore play
+        if animation_common and animation_common.has_animation then
+            if is_supported and not has_mag_data and animation_common.has_animation(sec, "anm_ammo_check_no_mag") then
+                anm_table.anm_name = "anm_ammo_check_no_mag"
+                print_dbg("Ammo check animation mutated to: %s", anm_table.anm_name)
+            elseif obj:get_ammo_in_magazine() == 0 and animation_common.has_animation(sec, "anm_ammo_check_empty") then
+                anm_table.anm_name = "anm_ammo_check_empty"
+                print_dbg("Ammo check animation mutated to: %s", anm_table.anm_name)
+            elseif animation_common.has_animation(sec, "anm_ammo_check") then
+                anm_table.anm_name = "anm_ammo_check"
+                print_dbg("Ammo check animation mutated to: %s", anm_table.anm_name)
+            else
+                -- No ammo_check animation - let the default inspect animation play
+                print_dbg("No ammo_check animation for %s, using default inspect: %s", sec, anm_table.anm_name)
+            end
+        end
+        
+        do_ammo_check_anim = 2
+    end
 end
 
 -- Game initialization --
@@ -801,7 +945,7 @@ function on_game_start()
         is_supported_weapon = null_function
         get_mag_loaded = null_function
         is_jammed_weapon = null_function
-        get_sec_chambered = null_function
+        get_sec_chambered = nil_function  -- Must return nil, not false
         print_dbg("MagsRedux not found. Working in standalone mode.")
     end
 
@@ -810,6 +954,76 @@ function on_game_start()
     RegisterScriptCallback("on_key_press", on_key_press)
     RegisterScriptCallback("actor_on_hud_animation_end", actor_on_hud_animation_end)
     RegisterScriptCallback("actor_on_weapon_jammed", actor_on_weapon_jammed)
+    
+    -- Register animation mutator for fake reload mode
+    if animation_common and animation_common.add_anim_mutator then
+        animation_common.add_anim_mutator(mag_check_animation, 2)
+        print_dbg("Animation mutator registered: mag_check_animation (priority 2)")
+    end
+end
+
+-- ============================================
+-- Animation Debug System
+-- When Debug Mode is ON:
+--   Numpad 0-9 = Test weapon state 0-9
+--   Numpad * = List all animations for current weapon
+-- ============================================
+
+-- Debug: Test different weapon states
+function debug_test_state(state_num)
+    local weapon = db.actor and db.actor:active_item()
+    if not weapon or not IsWeapon(weapon) then
+        db.actor:give_game_news("AmmoCheck Debug", "No weapon active!", "ui_inGame2_D_Ohotnik_na_mutantov", 0, 3000, 0)
+        return
+    end
+    
+    local sec = weapon:section()
+    local current_state = weapon:get_state()
+    
+    -- Only switch if weapon is idle
+    if current_state ~= 0 then
+        db.actor:give_game_news("AmmoCheck Debug", "Weapon not idle! State: " .. current_state, "ui_inGame2_D_Ohotnik_na_mutantov", 0, 3000, 0)
+        return
+    end
+    
+    db.actor:give_game_news("AmmoCheck Debug", "Testing state " .. state_num .. " on " .. sec, "ui_inGame2_D_Ohotnik_na_mutantov", 0, 3000, 0)
+    weapon:switch_state(state_num)
+end
+
+-- Debug: List all animations for current weapon
+function debug_list_animations()
+    local weapon = db.actor and db.actor:active_item()
+    if not weapon or not IsWeapon(weapon) then
+        db.actor:give_game_news("AmmoCheck Debug", "No weapon active!", "ui_inGame2_D_Ohotnik_na_mutantov", 0, 3000, 0)
+        return
+    end
+    
+    local sec = weapon:section()
+    local hud_section = ini_sys:r_string_ex(sec, "hud") or sec
+    
+    local animations_to_check = {
+        "anm_idle", "anm_reload", "anm_reload_empty",
+        "anm_open", "anm_close", "anm_add_cartridge",
+        "anm_bore", "anm_shots", "anm_shoot",
+        "anm_ammo_check", "anm_ammo_check_empty", "anm_ammo_check_no_mag",
+    }
+    
+    local found = {}
+    for _, anm in ipairs(animations_to_check) do
+        local value = SYS_GetParam(0, hud_section, anm)
+        if value then
+            table.insert(found, anm)
+        end
+    end
+    
+    local msg = sec .. ":\\n" .. table.concat(found, ", ")
+    db.actor:give_game_news("AmmoCheck Debug - Animations", msg, "ui_inGame2_D_Ohotnik_na_mutantov", 0, 8000, 0)
+    
+    -- Also print to console for full details
+    printf("[AmmoCheck DEBUG] Weapon: %s | HUD: %s", sec, hud_section)
+    for _, anm in ipairs(found) do
+        printf("  [+] %s", anm)
+    end
 end
 
 -- MCM Configuration --
@@ -859,8 +1073,30 @@ function on_mcm_load()
             -- Animation Settings
             { id = "divider_anim", type = "line" },
             { id = "title_anim", type = "title", text = "ui_mcm_rax_ammo_check_title_anim" },
-            { id = "busy_hands_fix", type = "check", val = 1, def = false },
-            { id = "alt_mag_inspect", type = "check", val = 1, def = false },
+            { id = "enable_animations", type = "check", val = 1, def = true },
+            { id = "anim_mode", type = "list", val = 2, def = 0,
+                content = {
+                    { 0, "anim_mode_default" },
+                    { 1, "anim_mode_lower" },
+                    { 2, "anim_mode_fake_reload" }
+                }
+            },
+            { id = "no_magazine_fallback", type = "list", val = 2, def = 1,
+                content = {
+                    { 0, "fallback_hide_show" },
+                    { 1, "fallback_lower" },
+                    { 2, "fallback_none" }
+                }
+            },
+            { id = "fake_reload_fallback", type = "list", val = 2, def = 1,
+                content = {
+                    { 0, "fallback_hide_show" },
+                    { 1, "fallback_lower" }
+                }
+            },
+            { id = "fake_reload_bolt_cycle", type = "check", val = 1, def = true },
+            { id = "fake_reload_pump_rack", type = "check", val = 1, def = true },
+            { id = "fake_reload_ignore_list", type = "check", val = 1, def = true },
             { id = "busy_hands_delay", type = "track", val = 2, min = 0.5, max = 3, step = 0.25, def = 1.5 },
             
             -- Keybind Settings
@@ -922,9 +1158,19 @@ function on_option_change()
         auto_check_reload = ui_mcm.get("rax_ammo_check/auto_check_reload")
         
         -- Animation settings
-        busy_hands_fix = ui_mcm.get("rax_ammo_check/busy_hands_fix")
-        alt_mag_inspect = ui_mcm.get("rax_ammo_check/alt_mag_inspect")
+        local enable_val = ui_mcm.get("rax_ammo_check/enable_animations")
+        enable_animations = (enable_val == true or enable_val == 1 or enable_val == nil)  -- Default true
+        anim_mode = ui_mcm.get("rax_ammo_check/anim_mode") or 0
+        no_magazine_fallback = ui_mcm.get("rax_ammo_check/no_magazine_fallback") or 1
+        fake_reload_fallback = ui_mcm.get("rax_ammo_check/fake_reload_fallback") or 1
+        local bolt_val = ui_mcm.get("rax_ammo_check/fake_reload_bolt_cycle")
+        fake_reload_bolt_cycle = (bolt_val == true or bolt_val == 1 or bolt_val == nil)  -- Default true
+        local pump_val = ui_mcm.get("rax_ammo_check/fake_reload_pump_rack")
+        fake_reload_pump_rack = (pump_val == true or pump_val == 1 or pump_val == nil)  -- Default true
+        local ignore_val = ui_mcm.get("rax_ammo_check/fake_reload_ignore_list")
+        fake_reload_ignore_list = (ignore_val == true or ignore_val == 1 or ignore_val == nil)  -- Default true
         busy_hands_delay = ui_mcm.get("rax_ammo_check/busy_hands_delay") or 1.5
+        print_dbg("Animation settings: enable=%s, anim_mode=%s, no_mag_fb=%s, fake_fb=%s, bolt=%s, pump=%s, ignore=%s", tostring(enable_animations), anim_mode, no_magazine_fallback, fake_reload_fallback, tostring(fake_reload_bolt_cycle), tostring(fake_reload_pump_rack), tostring(fake_reload_ignore_list))
         
         -- Debug settings
         debug_mode = ui_mcm.get("rax_ammo_check/debug_mode")
@@ -939,12 +1185,6 @@ function on_option_change()
         end
     end
 
-    -- Update colors based on intensity
-    update_colors()
-    
-    -- Clear translation cache when options change (language might have changed)
-    translation_cache = {}
-    
     -- Update HUD elements (cached access)
     local hud_states = ActorMenu.get_maingame().m_ui_hud_states
     local ammo_counter = hud_states.m_ui_weapon_cur_ammo
@@ -961,19 +1201,216 @@ function on_option_change()
     print_dbg("Options updated - display_mode: %s, color_intensity: %s, msg_duration: %s", display_mode, color_intensity, msg_duration)
 end
 
--- Legacy function name for compatibility --
-function checkAmmo() end
-
 -- Pending message globals for TimeEvent access --
 local ac_pending_message = nil
 local ac_pending_clr = nil
 local ac_pending_ammo_type = nil
 local ac_pending_separate_tag = nil
+local ac_pending_slot = nil  -- For restore_weapon_callback
 
 -- Pre-defined callback for delayed display --
 local function delayed_display_callback()
     display_ammo_status(ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag)
     return true
+end
+
+-- Pre-defined callback for restore weapon after hide --
+local function restore_weapon_callback()
+    local actor = db.actor
+    if not actor then return true end
+    
+    if actor:active_item() then
+        return false  -- Wait for weapon to fully hide
+    end
+    
+    if not weapon_hidden then
+        actor:activate_slot(ac_pending_slot)
+        return true
+    end
+    
+    display_ammo_status(ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag)
+    actor:activate_slot(ac_pending_slot)
+    weapon_hidden = false
+    return true
+end
+
+-- Restore detector after animation completes (checks weapon state) --
+local function restore_detector_after_anim(weapon)
+    if not weapon then 
+        -- Weapon gone, just restore detector
+        if det_active then
+            db.actor:show_detector(true)
+            det_active = nil
+        end
+        return true 
+    end
+    
+    -- Wait for weapon to return to idle (state 0)
+    if weapon:get_state() ~= 0 then
+        return false
+    end
+    
+    -- Restore detector
+    if det_active then
+        db.actor:show_detector(true)
+        det_active = nil
+    end
+    
+    -- Clear animation state
+    do_ammo_check_anim = nil
+    wpn_checking = nil
+    
+    return true
+end
+
+-- ============================================
+-- Fake Reload Animation System
+-- Plays reload animation without actually reloading
+-- ============================================
+
+-- Restore ammo after fake reload animation completes --
+local function restore_ammo_after_reload(weapon, count, pre_table)
+    if not weapon then return true end
+    if weapon:get_state() == 0 then
+        weapon:set_ammo_elapsed(count)
+        -- Refund ammo if MagsRedux is installed and we have a valid pre_table
+        if pre_table and type(pre_table) == "table" and magazines and magazines.refund_ammo then
+            magazines.refund_ammo(pre_table, weapon)  -- table first, then weapon
+        end
+        print_dbg("Fake reload complete, ammo restored: %s", count)
+        
+        -- Restore detector
+        if det_active then
+            db.actor:show_detector(true)
+            det_active = nil
+        end
+        return true
+    end
+    return false
+end
+
+-- Play HUD animation directly by name (like the first pickup inspect mod) --
+-- This bypasses the state machine and plays the animation directly
+local function play_hud_animation(weapon, anim_name, sound_param)
+    local sec = weapon:section()
+    
+    -- Play the animation directly
+    weapon:play_hud_motion(anim_name, true, 0, 1, 0)
+    
+    -- Play the associated sound if available
+    if sound_param then
+        local sound_file = ini_sys:r_string_ex(sec, sound_param)
+        if sound_file and sound_file ~= "$no_sound" then
+            local snd = sound_object(sound_file)
+            if snd then
+                snd:play_no_feedback(db.actor, sound_object.s2d, 0, vector():set(0,0,0), 1.0, 1.0)
+            end
+        end
+    end
+    
+    print_dbg("Playing HUD animation '%s' for %s", anim_name, sec)
+end
+
+-- Callback to play anm_close after anm_open finishes --
+local function play_close_animation(weapon, sound_param)
+    if not weapon then 
+        -- Weapon gone, just restore detector
+        if det_active then
+            db.actor:show_detector(true)
+            det_active = nil
+        end
+        return true 
+    end
+    
+    local sec = weapon:section()
+    
+    -- Play close animation
+    weapon:play_hud_motion("anm_close", true, 0, 1, 0)
+    
+    -- Play associated sound if available
+    if sound_param then
+        local sound_file = ini_sys:r_string_ex(sec, sound_param)
+        if sound_file and sound_file ~= "$no_sound" then
+            local snd = sound_object(sound_file)
+            if snd then
+                snd:play_no_feedback(db.actor, sound_object.s2d, 0, vector():set(0,0,0), 1.0, 1.0)
+            end
+        end
+    end
+    
+    print_dbg("Playing anm_close for %s", sec)
+    
+    -- Schedule detector restoration
+    CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
+    
+    return true
+end
+
+-- Play bolt/pump cycle animation (anm_open -> delay -> anm_close) --
+-- delay_time: seconds to wait between open and close animations
+local function play_open_close_animation(weapon, delay_time)
+    local wpn_id = weapon:id()
+    local sec = weapon:section()
+    local delay = delay_time or 0.7  -- Default 0.7 seconds
+    
+    print_dbg("Bolt/pump cycle for %s: playing anm_open -> %.2fs -> anm_close", sec, delay)
+    
+    -- Play open animation with sound
+    weapon:play_hud_motion("anm_open", true, 0, 1, 0)
+    
+    -- Play open sound if available
+    local open_sound = ini_sys:r_string_ex(sec, "snd_open_weapon")
+    if open_sound and open_sound ~= "$no_sound" then
+        local snd = sound_object(open_sound)
+        if snd then
+            snd:play_no_feedback(db.actor, sound_object.s2d, 0, vector():set(0,0,0), 1.0, 1.0)
+        end
+    end
+    
+    -- Schedule close animation after delay
+    CreateTimeEvent("AmmoCheck_BoltCycle", "close"..wpn_id, delay, play_close_animation, weapon, "snd_close_weapon")
+    
+    return true
+end
+
+-- Play fake reload animation for weapons with detachable magazines --
+-- This is only called when we KNOW the weapon uses magazines
+local function play_reload_animation(weapon)
+    local wpn_id = weapon:id()
+    local sec = weapon:section()
+    local current_ammo = weapon:get_ammo_in_magazine()
+    
+    -- MagsRedux path: handles magazines and chambered rounds properly
+    if magazines and is_supported_weapon(sec) then
+        local current_magazine = get_mag_loaded(wpn_id)
+        
+        -- Safely get ammo count table
+        local pre_table = nil
+        if magazines.count_ammo then
+            local result = magazines.count_ammo(weapon)
+            if type(result) == "table" then
+                pre_table = result
+            end
+        end
+        
+        -- If one in the chamber, reloading will subtract a box of ammo and create a new dummy mag
+        if not current_magazine and magazines.retain_round and magazines.retain_round(weapon) and (current_ammo > 0) then
+            local oitc_ammo_sec = magazines.get_sec_chambered(weapon)
+            local oitc_ammo_type = weapon:get_ammo_type()
+            print_dbg("One (%s: %s) in the chamber and no magazine loaded.", oitc_ammo_type, oitc_ammo_sec)
+            weapon:set_ammo_elapsed(0)
+            weapon:switch_state(7)
+            CreateTimeEvent("AmmoCheck_FakeReload", "dummy_reload"..wpn_id, 0.1, restore_ammo_after_reload, weapon, 1, pre_table)
+        else
+            weapon:switch_state(7)
+            CreateTimeEvent("AmmoCheck_FakeReload", "dummy_reload"..wpn_id, 0.1, restore_ammo_after_reload, weapon, current_ammo, pre_table)
+        end
+    else
+        -- Vanilla path: simple save/restore of ammo count
+        print_dbg("Fake reload for vanilla weapon, ammo count: %s", current_ammo)
+        weapon:switch_state(7)
+        CreateTimeEvent("AmmoCheck_FakeReload", "dummy_reload"..wpn_id, 0.1, restore_ammo_after_reload, weapon, current_ammo, nil)
+    end
 end
 
 -- Silent ammo check (no weapon hide animation) - used for auto-check after reload --
@@ -1000,6 +1437,84 @@ function check_Ammo_silent()
     
     -- Display directly
     display_ammo_status(message, clr, ammo_type, separate_tag)
+end
+
+-- Ammo check after reload (for OneKeyReload compatibility) --
+-- Shows "Loaded" message after reload completes
+function check_ammo_after_reload()
+    local actor = db.actor
+    if not actor then return true end
+    
+    local weapon = actor:active_item()
+    if not weapon then return true end
+    if not IsWeapon(weapon) then return true end
+    if IsItem("fake_ammo_wpn", nil, weapon) then return true end
+    
+    local currentState = weapon:get_state()
+    if not (currentState == 0 or weapon:weapon_in_grenade_mode()) then
+        return false  -- Still reloading, try again
+    end
+    
+    local currentAmmo = weapon:get_ammo_in_magazine()
+    if not currentAmmo then return true end
+    
+    local weaponId = weapon:id()
+    local sec = weapon:section()
+    local in_grenade_mode = weapon:weapon_in_grenade_mode()
+    
+    -- Get ammo status using shared function
+    local message, clr, ammo_type, separate_tag = get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
+    
+    disable_info("sleep_active")
+    
+    -- Display with "Loaded" prefix
+    if message then
+        local loaded_msg = game.translate_string("st_ac_loaded") .. " " .. message
+        if show_ammo_type and ammo_type then
+            if separate_tag then
+                loaded_msg = loaded_msg .. " " .. ammo_type
+            else
+                loaded_msg = ammo_type .. " " .. loaded_msg
+            end
+        end
+        actor_menu.set_msg(1, loaded_msg, msg_duration, use_clr and clr or nil)
+    end
+    
+    return true
+end
+
+-- ============================================
+-- Weapon Configuration - External File
+-- ============================================
+-- Weapon exclusion lists are defined in ammo_check_weapons.script
+-- This allows easy customization without modifying the main script.
+
+local function get_break_action_config(sec)
+    if ammo_check_weapons and ammo_check_weapons.get_break_action_config then
+        return ammo_check_weapons.get_break_action_config(sec)
+    end
+    return nil
+end
+
+local function get_bolt_action_config(sec)
+    if ammo_check_weapons and ammo_check_weapons.get_bolt_action_config then
+        return ammo_check_weapons.get_bolt_action_config(sec)
+    end
+    return nil
+end
+
+local function get_pump_action_config(sec)
+    if ammo_check_weapons and ammo_check_weapons.get_pump_action_config then
+        return ammo_check_weapons.get_pump_action_config(sec)
+    end
+    return nil
+end
+
+local function should_ignore_fake_animations(sec)
+    if ammo_check_weapons and ammo_check_weapons.should_ignore_fake_animations then
+        return ammo_check_weapons.should_ignore_fake_animations(sec)
+    end
+    return false
 end
 
 -- Main ammo check function --
@@ -1039,38 +1554,214 @@ function check_Ammo(skip_animation)
     ac_pending_ammo_type = ammo_type
     ac_pending_separate_tag = separate_tag
 
-    -- Display the message
-    if skip_animation or busy_hands_fix or weapon_busy then
-        -- Show immediately if skipping animation, using busy hands fix, or weapon is busy
-        local delay = skip_animation and 0 or (weapon_busy and 0 or busy_hands_delay)
-        RemoveTimeEvent("ammo_check", "message_delay")
-        RemoveTimeEvent("ammo_check", "restore_weapon")
-        CreateTimeEvent("ammo_check", "message_delay", delay, delayed_display_callback)
-    elseif alt_mag_inspect then
-        -- Alternative animation: lower weapon like pressing B, show message with delay
-        game.actor_lower_weapon(true)
-        RemoveTimeEvent("ammo_check", "message_delay")
-        RemoveTimeEvent("ammo_check", "restore_weapon")
+    -- Cleanup previous events
+    RemoveTimeEvent("ammo_check", "message_delay")
+    RemoveTimeEvent("ammo_check", "restore_weapon")
+    RemoveTimeEvent("ammo_check", "restore_det")
+    RemoveTimeEvent("AmmoCheck_BoltCycle", "close"..weaponId)
+    
+    -- Clear any lingering animation state
+    do_ammo_check_anim = nil
+    wpn_checking = nil
+    
+    -- ============================================
+    -- ANIMATION LOGIC
+    -- ============================================
+    
+    -- Check if weapon has PROPER custom mag inspect animation
+    local has_proper_inspect = has_animation(sec, "anm_ammo_check") or 
+                               has_animation(sec, "anm_ammo_check_empty") or
+                               has_animation(sec, "anm_ammo_check_no_mag")
+    
+    -- If weapon busy or skip requested: just show message
+    if skip_animation or weapon_busy then
+        CreateTimeEvent("ammo_check", "message_delay", 0, delayed_display_callback)
+        return
+    end
+    
+    -- If animations are disabled: just show message with delay
+    if not enable_animations then
+        print_dbg("Ammo check for %s - animations disabled, showing message only.", sec)
         CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
-    else
-        -- Default animation: lower weapon, show message, raise weapon
-        local slot = actor:active_slot()
+        return
+    end
+    
+    -- ============================================
+    -- A) Weapon HAS proper mag inspect animation
+    --    Let the native animation play, just show the message
+    -- ============================================
+    if has_proper_inspect then
+        print_dbg("Ammo check for %s - has proper inspect animation, NOT interfering.", sec)
+        CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+        return
+    end
+    
+    -- ============================================
+    -- B) Weapon DOES NOT have proper mag inspect animation
+    --    Apply our alternative animation setting
+    -- ============================================
+    
+    -- B.1) Default mode: hide/show weapon
+    if anim_mode == 0 then
+        print_dbg("Ammo check for %s - using hide/show weapon.", sec)
+        ac_pending_slot = actor:active_slot()
         actor:activate_slot(0)
         weapon_hidden = true
+        CreateTimeEvent("ammo_check", "restore_weapon", 0, restore_weapon_callback)
+        return
+    end
+    
+    -- B.2) Lower weapon mode
+    if anim_mode == 1 then
+        print_dbg("Ammo check for %s - using lower weapon.", sec)
+        game.actor_lower_weapon(true)
+        CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+        return
+    end
+    
+    -- B.3) Fake reload mode
+    if anim_mode == 2 then
+        -- Check if weapon should be ignored for fake reload animations
+        if fake_reload_ignore_list and should_ignore_fake_animations(sec) then
+            print_dbg("Ammo check for %s - in ignore list, using fake_reload_fallback=%s.", sec, fake_reload_fallback)
+            
+            if fake_reload_fallback == 0 then
+                -- Hide/show weapon
+                ac_pending_slot = actor:active_slot()
+                actor:activate_slot(0)
+                weapon_hidden = true
+                CreateTimeEvent("ammo_check", "restore_weapon", 0, restore_weapon_callback)
+            else
+                -- Lower weapon
+                game.actor_lower_weapon(true)
+                CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+            end
+            return
+        end
         
-        CreateTimeEvent("ammo_check", "restore_weapon", 0, function(s)
-            if db.actor:active_item() then
-                return false
+        -- Check if weapon uses detachable magazines (MagsRedux supported)
+        local uses_magazines = magazines and is_supported_weapon(sec)
+        
+        if uses_magazines then
+            -- Check if this is a DETACHABLE magazine weapon vs INTERNAL magazine (tube, etc.)
+            -- weapon_default_magazine returns nil for internal magazine weapons
+            local has_detachable_mag = magazine_binder and magazine_binder.weapon_default_magazine and 
+                                       magazine_binder.weapon_default_magazine(weapon)
+            
+            if has_detachable_mag then
+                -- DETACHABLE magazine weapon - check if magazine is actually loaded
+                local current_magazine = get_mag_loaded(weaponId)
+                
+                if current_magazine then
+                    -- Has magazine - play fake reload animation
+                    print_dbg("Ammo check for %s - detachable mag weapon with mag, using fake reload animation.", sec)
+                    
+                    det_active = actor:active_detector() or nil
+                    if det_active then
+                        det_active:switch_state(2)
+                    end
+                    
+                    play_reload_animation(weapon)
+                    CreateTimeEvent("ammo_check", "message_delay", FAKE_RELOAD_MSG_DELAY, delayed_display_callback)
+                    return
+                else
+                    -- No magazine loaded - apply no_magazine_fallback
+                    print_dbg("Ammo check for %s - detachable mag weapon, no mag, using no_magazine_fallback=%s.", sec, no_magazine_fallback)
+                    
+                    if no_magazine_fallback == 0 then
+                        -- Hide/show weapon
+                        ac_pending_slot = actor:active_slot()
+                        actor:activate_slot(0)
+                        weapon_hidden = true
+                        CreateTimeEvent("ammo_check", "restore_weapon", 0, restore_weapon_callback)
+                    elseif no_magazine_fallback == 1 then
+                        -- Lower weapon
+                        game.actor_lower_weapon(true)
+                        CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+                    else
+                        -- None - just show message, no animation
+                        CreateTimeEvent("ammo_check", "message_delay", 0, delayed_display_callback)
+                    end
+                    return
+                end
             end
-            if not weapon_hidden then
-                db.actor:activate_slot(s)
-                weapon_hidden = false
-                return true
+            -- else: Internal magazine weapon - fall through to exclusion lists below
+            print_dbg("Ammo check for %s - internal magazine weapon (MagsRedux), checking exclusion lists.", sec)
+        end
+        
+        -- ============================================
+        -- Weapon does NOT use detachable magazines (internal magazine)
+        -- Check exclusion lists for special handling
+        -- ============================================
+        
+        -- Check 1: Break-action shotgun (TOZ-34 style)
+        local break_config = get_break_action_config(sec)
+        if break_config and has_animation(sec, break_config.anim) then
+            print_dbg("Ammo check for %s - break-action, using %s animation.", sec, break_config.anim)
+            
+            det_active = actor:active_detector() or nil
+            if det_active then
+                det_active:switch_state(2)
             end
-            display_ammo_status(ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag)
-            db.actor:activate_slot(s)
-            return true
-        end, slot)
+            
+            play_hud_animation(weapon, break_config.anim, break_config.sound)
+            
+            CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+            CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
+            return
+        end
+        
+        -- Check 2: Bolt-action rifle (if MCM option enabled)
+        if fake_reload_bolt_cycle then
+            local bolt_config = get_bolt_action_config(sec)
+            if bolt_config and has_animation(sec, "anm_open") and has_animation(sec, "anm_close") then
+                print_dbg("Ammo check for %s - bolt-action, using open/close with %.2fs delay.", sec, bolt_config.delay)
+                
+                det_active = actor:active_detector() or nil
+                if det_active then
+                    det_active:switch_state(2)
+                end
+                
+                play_open_close_animation(weapon, bolt_config.delay)
+                CreateTimeEvent("ammo_check", "message_delay", bolt_config.delay + BOLT_PUMP_MSG_OFFSET, delayed_display_callback)
+                return
+            end
+        end
+        
+        -- Check 3: Pump-action shotgun (if MCM option enabled)
+        if fake_reload_pump_rack then
+            local pump_config = get_pump_action_config(sec)
+            if pump_config and has_animation(sec, "anm_open") and has_animation(sec, "anm_close") then
+                print_dbg("Ammo check for %s - pump-action, using open/close with %.2fs delay.", sec, pump_config.delay)
+                
+                det_active = actor:active_detector() or nil
+                if det_active then
+                    det_active:switch_state(2)
+                end
+                
+                play_open_close_animation(weapon, pump_config.delay)
+                CreateTimeEvent("ammo_check", "message_delay", pump_config.delay + BOLT_PUMP_MSG_OFFSET, delayed_display_callback)
+                return
+            end
+        end
+        
+        -- ============================================
+        -- Fallback: Use fake_reload_fallback setting
+        -- ============================================
+        if fake_reload_fallback == 0 then
+            -- Hide/show weapon
+            print_dbg("Ammo check for %s - fallback to hide/show weapon.", sec)
+            ac_pending_slot = actor:active_slot()
+            actor:activate_slot(0)
+            weapon_hidden = true
+            CreateTimeEvent("ammo_check", "restore_weapon", 0, restore_weapon_callback)
+        else
+            -- Lower weapon
+            print_dbg("Ammo check for %s - fallback to lower weapon.", sec)
+            game.actor_lower_weapon(true)
+            CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+        end
+        return
     end
 end
 

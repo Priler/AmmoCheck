@@ -1,0 +1,151 @@
+-- AmmoCheck Weapon Exclusion Lists
+-- This file contains weapon configurations for special animation handling.
+-- 
+-- HOW TO ADD WEAPONS:
+-- 1. Find the weapon section name in configs (e.g., "wpn_mp133")
+-- 2. Add it to the appropriate list below
+-- 3. The lookup uses PREFIX matching, so "wpn_mp133" matches "wpn_mp133_camo" etc.
+--
+-- HOW TO CUSTOMIZE:
+-- - delay: Time in seconds between anm_open and anm_close
+-- - anim: Animation name to play
+-- - sound: Sound parameter from weapon config
+-- ============================================
+
+local string_find = string.find
+
+-- Cache for lookup results (cleared on game load)
+local config_cache = {}
+
+
+-- ============================================
+-- Break-action shotguns
+-- These use a custom animation (usually anm_bore)
+-- Format: [prefix] = { anim = "animation_name", sound = "sound_param" }
+-- ============================================
+local break_action_shotguns = {
+    ["wpn_toz34"] = { anim = "anm_bore", sound = "snd_bore" }, -- badass Chimera Hunter ammo check animation
+    -- ["wpn_izh43"] = { anim = "anm_bore", sound = "snd_bore" },
+}
+
+
+-- ============================================
+-- Bolt-action rifles
+-- These play anm_open -> delay -> anm_close (bolt cycle)
+-- Format: [prefix] = { delay = seconds_between_open_and_close }
+-- ============================================
+local bolt_action_rifles = {
+    ["wpn_k98"] = { delay = 1.0 },
+    ["wpn_kar98"] = { delay = 0.7 },
+    ["wpn_springfield"] = { delay = 0.7 },
+    ["wpn_m24"] = { delay = 0.8 },
+    ["wpn_remington700"] = { delay = 0.7 },
+    ["wpn_cz550"] = { delay = 0.7 },
+    ["wpn_scout"] = { delay = 0.6 },
+    ["wpn_sks"] = { delay = 0.5 },
+    ["wpn_sv98"] = { delay = 0.7 },
+    ["wpn_svd"] = { delay = 0.6 },
+    -- ["wpn_mosin"] = { delay = 0.8 },
+}
+
+
+-- ============================================
+-- Pump-action shotguns  
+-- These play anm_open -> delay -> anm_close (pump rack)
+-- Format: [prefix] = { delay = seconds_between_open_and_close }
+-- ============================================
+local pump_action_shotguns = {
+    ["wpn_ks23"] = { delay = 0.6 },
+    ["wpn_mossberg"] = { delay = 0.5 },
+    ["wpn_remington870"] = { delay = 0.5 },
+    ["wpn_spas12"] = { delay = 0.5 },
+    ["wpn_m1014"] = { delay = 0.4 },
+    ["wpn_protecta"] = { delay = 0.4 },
+    ["wpn_toz194"] = { delay = 0.5 },
+    ["wpn_mp133"] = { delay = 0.5 },
+    ["wpn_mp153"] = { delay = 0.5 },
+    ["wpn_mp155"] = { delay = 0.6 },
+    -- ["wpn_winchester1897"] = { delay = 0.6 },
+}
+
+
+-- ============================================
+-- Ignore fake animations list
+-- Weapons in this list will NEVER use fake reload animations,
+-- regardless of the "Fake Reload" animation mode setting.
+-- They will fall back to the selected fallback behavior.
+-- Format: [prefix] = true
+-- * bruh probably should named it "ignore_fake_reload" .. but I'm too lazy boboo :3
+-- ============================================
+local ignore_fake_animations = {
+    -- Add weapons that should skip fake animations here:
+    ["wpn_g36ka4_rwap"] = true, -- Mag Palming (non-immersive)
+    -- ["wpn_with_bad_anim"] = true,
+}
+
+
+-- ============================================
+-- Internal lookup helper (with caching)
+-- ============================================
+function lookup_config(sec, weapon_table, cache_prefix)
+    -- Check cache first
+    local cache_key = cache_prefix .. sec
+    if config_cache[cache_key] ~= nil then
+        return config_cache[cache_key] or nil  -- false means "not found" in cache
+    end
+    
+    -- Search weapon table
+    for prefix, config in pairs(weapon_table) do
+        if sec == prefix or string_find(sec, "^" .. prefix) then
+            config_cache[cache_key] = config
+            return config
+        end
+    end
+    
+    -- Cache negative result
+    config_cache[cache_key] = false
+    return nil
+end
+
+
+-- ============================================
+-- Lookup Functions (called from main script)
+-- Returns config table if weapon matches, nil otherwise
+-- ============================================
+
+function get_break_action_config(sec)
+    return lookup_config(sec, break_action_shotguns, "break_")
+end
+
+function get_bolt_action_config(sec)
+    return lookup_config(sec, bolt_action_rifles, "bolt_")
+end
+
+function get_pump_action_config(sec)
+    return lookup_config(sec, pump_action_shotguns, "pump_")
+end
+
+function should_ignore_fake_animations(sec)
+    -- Check cache first
+    local cache_key = "ignore_" .. sec
+    if config_cache[cache_key] ~= nil then
+        return config_cache[cache_key]
+    end
+    
+    -- Search ignore list
+    for prefix, _ in pairs(ignore_fake_animations) do
+        if sec == prefix or string_find(sec, "^" .. prefix) then
+            config_cache[cache_key] = true
+            return true
+        end
+    end
+    
+    -- Cache negative result
+    config_cache[cache_key] = false
+    return false
+end
+
+-- Clear cache (can be called on game load if needed)
+function clear_config_cache()
+    config_cache = {}
+end
