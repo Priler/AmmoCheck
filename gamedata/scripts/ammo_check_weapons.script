@@ -88,6 +88,23 @@ ignore_fake_animations = {
 
 
 -- ============================================
+-- Eject shell exclude list
+-- Pump-action shotguns in this list will NOT eject a shell
+-- when checking ammo, even if "Eject Shell" option is enabled.
+-- Useful for shotguns where ejecting doesn't make sense
+-- (e.g., tube-fed shotguns with no shell stop).
+-- Format: [prefix] = true
+-- ============================================
+eject_shell_exclude = {
+    ["wpn_ks23"] = true, -- doesn't use rack slide animation
+    ["wpn_mp155"] = true, -- doesn't use rack slide animation
+
+    -- ["wpn_protecta"] = true,  -- Rotary magazine
+    -- ["wpn_saiga"] = true,     -- Box magazine
+}
+
+
+-- ============================================
 -- Cache for lookup results (cleared on reload)
 -- ============================================
 config_cache = {}
@@ -177,6 +194,28 @@ function should_ignore_fake_animations(sec)
     
     -- Search ignore list
     for prefix, _ in pairs(ignore_fake_animations) do
+        if sec == prefix or string.find(sec, "^" .. prefix) then
+            config_cache[cache_key] = true
+            return true
+        end
+    end
+    
+    -- Cache negative result
+    config_cache[cache_key] = false
+    return false
+end
+
+function should_exclude_shell_eject(sec)
+    if not sec then return false end
+    
+    -- Check cache first
+    local cache_key = "eject_exclude_" .. sec
+    if config_cache[cache_key] ~= nil then
+        return config_cache[cache_key]
+    end
+    
+    -- Search exclude list
+    for prefix, _ in pairs(eject_shell_exclude) do
         if sec == prefix or string.find(sec, "^" .. prefix) then
             config_cache[cache_key] = true
             return true

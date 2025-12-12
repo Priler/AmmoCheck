@@ -97,7 +97,7 @@ local RESTORE_DET_DELAY = 0.1           -- Delay before checking to restore dete
 -- Cached objects (GC optimization) --
 local ZERO_VECTOR = vector():set(0, 0, 0)  -- Reusable zero vector for sound positioning
 
--- Debug mode numpad key mappings --
+-- Debug mode numpad key mappings (defined once, not per keypress) --
 local numpad_states = {
     [DIK_keys.DIK_NUMPAD0] = 0,
     [DIK_keys.DIK_NUMPAD1] = 1,
@@ -1592,6 +1592,13 @@ local function should_ignore_fake_animations(sec)
     return false
 end
 
+local function should_exclude_shell_eject(sec)
+    if ammo_check_weapons and ammo_check_weapons.should_exclude_shell_eject then
+        return ammo_check_weapons.should_exclude_shell_eject(sec)
+    end
+    return false
+end
+
 -- Main ammo check function --
 function check_Ammo(skip_animation)
     local actor = db.actor
@@ -1842,8 +1849,8 @@ function check_Ammo(skip_animation)
                     det_active:switch_state(2)
                 end
                 
-                -- Eject one round if option enabled and there's ammo
-                if fake_reload_pump_eject and currentAmmo > 0 then
+                -- Eject one shell if option enabled, there's ammo, and weapon not excluded
+                if fake_reload_pump_eject and currentAmmo > 0 and not should_exclude_shell_eject(sec) then
                     local ammo_section = get_vanilla_ammo_section(weapon)
                     if ammo_section then
                         -- Remove one round from magazine
