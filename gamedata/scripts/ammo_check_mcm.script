@@ -22,6 +22,7 @@
 --   - Added custom weapons animation settings (for example, now Toz-34 Chimera Hunter also has a badass ammo check animation)
 --   - Added fake reload exclusion list (Mag Palming, etc. animations will be excluded)
 --   - Added "Eject round on bolt cyrcle" option
+--   - Added "Eject round on pump slide" option
 
 --  @TODO:
 --   - No magazine fallback only works for weapons without mag inspect animation
@@ -57,15 +58,15 @@ local string_sub = string.sub
 local gc = game.translate_string
 
 -- Settings (defaults) --
-local use_clr = false
+local use_clr = true
 local hide_counter = true
 local hide_ammo_icon = true
-local anim_mode = 0             -- 0: default (hide/show), 1: lower weapon, 2: fake reload
+local anim_mode = 2             -- 0: default (hide/show), 1: lower weapon, 2: fake reload
 local mcm_key = DIK_keys.DIK_T
 local msg_duration = 2
-local show_ammo_type = true
+local show_ammo_type = false
 local show_ammo_tag = true
-local busy_hands_delay = 1.5
+local busy_hands_delay = 1
 local no_magazine_fallback = 1  -- 0: hide/show, 1: lower, 2: none (for Fake Reload mode when no magazine loaded)
 local fake_reload_fallback = 1  -- 0: hide/show, 1: lower (for internal mag weapons)
 local fake_reload_bolt_cycle = true  -- Enable bolt cycle for bolt-action rifles
@@ -76,7 +77,7 @@ local enable_animations = true       -- Master switch for all animations
 local check_grenade_mode = false
 local display_mode = 0          -- 0: text, 1: numeric, 2: both
 local auto_check_reload = false
-local color_intensity = 100
+local color_intensity = 70
 local highlight_ammo_mode = 0   -- 0: none, 1: whole message, 2: separate lines
 local debug_mode = false
 
@@ -95,7 +96,7 @@ local RESTORE_DET_DELAY = 0.1           -- Delay before checking to restore dete
 -- Cached objects (GC optimization) --
 local ZERO_VECTOR = vector():set(0, 0, 0)  -- Reusable zero vector for sound positioning
 
--- Debug mode numpad key mappings --
+-- Debug mode numpad key mappings (defined once, not per keypress) --
 local numpad_states = {
     [DIK_keys.DIK_NUMPAD0] = 0,
     [DIK_keys.DIK_NUMPAD1] = 1,
@@ -1098,8 +1099,8 @@ function on_mcm_load()
             -- Display Settings
             { id = "divider_display", type = "line" },
             { id = "title_display", type = "title", text = "ui_mcm_rax_ammo_check_title_display" },
-            { id = "usecolor", type = "check", val = 1, def = false },
-            { id = "color_intensity", type = "track", val = 2, min = 30, max = 100, step = 10, def = 100 },
+            { id = "usecolor", type = "check", val = 1, def = true },
+            { id = "color_intensity", type = "track", val = 2, min = 30, max = 100, step = 10, def = 70 },
             { id = "display_mode", type = "list", val = 2, def = 0, 
                 content = { 
                     { 0, "dm_text" }, 
@@ -1107,7 +1108,7 @@ function on_mcm_load()
                     { 2, "dm_both" } 
                 } 
             },
-            { id = "show_ammo_type", type = "check", val = 1, def = true },
+            { id = "show_ammo_type", type = "check", val = 1, def = false },
             { id = "show_ammo_tag", type = "check", val = 1, def = true },
             { id = "highlight_ammo_mode", type = "list", val = 2, def = 0,
                 content = {
@@ -1134,7 +1135,7 @@ function on_mcm_load()
             { id = "divider_anim", type = "line" },
             { id = "title_anim", type = "title", text = "ui_mcm_rax_ammo_check_title_anim" },
             { id = "enable_animations", type = "check", val = 1, def = true },
-            { id = "anim_mode", type = "list", val = 2, def = 0,
+            { id = "anim_mode", type = "list", val = 2, def = 2,
                 content = {
                     { 0, "anim_mode_default" },
                     { 1, "anim_mode_lower" },
@@ -1158,7 +1159,7 @@ function on_mcm_load()
             { id = "fake_reload_bolt_eject", type = "check", val = 1, def = false },
             { id = "fake_reload_pump_rack", type = "check", val = 1, def = true },
             { id = "fake_reload_ignore_list", type = "check", val = 1, def = true },
-            { id = "busy_hands_delay", type = "track", val = 2, min = 0.5, max = 3, step = 0.25, def = 1.5 },
+            { id = "busy_hands_delay", type = "track", val = 2, min = 0.5, max = 3, step = 0.25, def = 1 },
             
             -- Keybind Settings
             { id = "divider_keys", type = "line" },
