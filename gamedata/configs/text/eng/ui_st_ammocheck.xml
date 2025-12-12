@@ -242,13 +242,19 @@
         <text>Bolt-Action: Eject Round</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_eject_desc">
-        <text>Just like in real life. When cycling the bolt, eject one round from the magazine (adds to inventory). Requires "Cycle Bolt" to be enabled.</text>
+        <text>When cycling the bolt, eject one round from the magazine (adds to inventory). Requires "Cycle Bolt" to be enabled. Off by default.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_pump_rack">
         <text>Pump-Action: Rack Slide</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_pump_rack_desc">
         <text>For pump-action shotguns (KS23, Remington 870, etc.) play pump open/close animation instead of fallback.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_pump_eject">
+        <text>Pump-Action: Eject Shell</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_pump_eject_desc">
+        <text>When racking the slide, eject one shell from the magazine (adds to inventory). Requires "Rack Slide" to be enabled. Off by default.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_ignore_list">
         <text>Fake Reload Ignore Some Weapons</text>

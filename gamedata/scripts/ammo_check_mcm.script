@@ -22,7 +22,7 @@
 --   - Added custom weapons animation settings (for example, now Toz-34 Chimera Hunter also has a badass ammo check animation)
 --   - Added fake reload exclusion list (Mag Palming, etc. animations will be excluded)
 --   - Added "Eject round on bolt cyrcle" option
---   - Added "Eject round on pump slide" option
+--   - Added "Eject shell on pump slide" option
 
 --  @TODO:
 --   - No magazine fallback only works for weapons without mag inspect animation
@@ -72,6 +72,7 @@ local fake_reload_fallback = 1  -- 0: hide/show, 1: lower (for internal mag weap
 local fake_reload_bolt_cycle = true  -- Enable bolt cycle for bolt-action rifles
 local fake_reload_bolt_eject = false -- Eject one round when cycling bolt (realism)
 local fake_reload_pump_rack = true   -- Enable pump rack for pump-action shotguns
+local fake_reload_pump_eject = false -- Eject one round when racking slide (realism)
 local fake_reload_ignore_list = true -- Use ignore list for non-immersive fake reloads
 local enable_animations = true       -- Master switch for all animations
 local check_grenade_mode = false
@@ -96,7 +97,7 @@ local RESTORE_DET_DELAY = 0.1           -- Delay before checking to restore dete
 -- Cached objects (GC optimization) --
 local ZERO_VECTOR = vector():set(0, 0, 0)  -- Reusable zero vector for sound positioning
 
--- Debug mode numpad key mappings (defined once, not per keypress) --
+-- Debug mode numpad key mappings --
 local numpad_states = {
     [DIK_keys.DIK_NUMPAD0] = 0,
     [DIK_keys.DIK_NUMPAD1] = 1,
@@ -1158,6 +1159,7 @@ function on_mcm_load()
             { id = "fake_reload_bolt_cycle", type = "check", val = 1, def = true },
             { id = "fake_reload_bolt_eject", type = "check", val = 1, def = false },
             { id = "fake_reload_pump_rack", type = "check", val = 1, def = true },
+            { id = "fake_reload_pump_eject", type = "check", val = 1, def = false },
             { id = "fake_reload_ignore_list", type = "check", val = 1, def = true },
             { id = "busy_hands_delay", type = "track", val = 2, min = 0.5, max = 3, step = 0.25, def = 1 },
             
@@ -1231,10 +1233,12 @@ function on_option_change()
         fake_reload_bolt_eject = (bolt_eject_val == true or bolt_eject_val == 1)  -- Default false
         local pump_val = ui_mcm.get("rax_ammo_check/fake_reload_pump_rack")
         fake_reload_pump_rack = (pump_val == true or pump_val == 1 or pump_val == nil)  -- Default true
+        local pump_eject_val = ui_mcm.get("rax_ammo_check/fake_reload_pump_eject")
+        fake_reload_pump_eject = (pump_eject_val == true or pump_eject_val == 1)  -- Default false
         local ignore_val = ui_mcm.get("rax_ammo_check/fake_reload_ignore_list")
         fake_reload_ignore_list = (ignore_val == true or ignore_val == 1 or ignore_val == nil)  -- Default true
         busy_hands_delay = ui_mcm.get("rax_ammo_check/busy_hands_delay") or 1.5
-        print_dbg("Animation settings: enable=%s, anim_mode=%s, no_mag_fb=%s, fake_fb=%s, bolt=%s, bolt_eject=%s, pump=%s, ignore=%s", tostring(enable_animations), anim_mode, no_magazine_fallback, fake_reload_fallback, tostring(fake_reload_bolt_cycle), tostring(fake_reload_bolt_eject), tostring(fake_reload_pump_rack), tostring(fake_reload_ignore_list))
+        print_dbg("Animation settings: enable=%s, anim_mode=%s, no_mag_fb=%s, fake_fb=%s, bolt=%s, bolt_eject=%s, pump=%s, pump_eject=%s, ignore=%s", tostring(enable_animations), anim_mode, no_magazine_fallback, fake_reload_fallback, tostring(fake_reload_bolt_cycle), tostring(fake_reload_bolt_eject), tostring(fake_reload_pump_rack), tostring(fake_reload_pump_eject), tostring(fake_reload_ignore_list))
         
         -- Debug settings
         debug_mode = ui_mcm.get("rax_ammo_check/debug_mode")
@@ -1836,6 +1840,22 @@ function check_Ammo(skip_animation)
                 det_active = actor:active_detector() or nil
                 if det_active then
                     det_active:switch_state(2)
+                end
+                
+                -- Eject one round if option enabled and there's ammo
+                if fake_reload_pump_eject and currentAmmo > 0 then
+                    local ammo_section = get_vanilla_ammo_section(weapon)
+                    if ammo_section then
+                        -- Remove one round from magazine
+                        weapon:set_ammo_elapsed(currentAmmo - 1)
+                        -- Give round to player inventory
+                        alife_create_item(ammo_section, actor)
+                        print_dbg("Ejected shell: %s (remaining: %d)", ammo_section, currentAmmo - 1)
+                        
+                        -- Update message to reflect new ammo count
+                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag = 
+                            get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
+                    end
                 end
                 
                 play_open_close_animation(weapon, pump_config.delay)
