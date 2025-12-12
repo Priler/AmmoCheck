@@ -238,6 +238,12 @@
     <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_cycle_desc">
         <text>For bolt-action rifles (Kar98, Springfield, etc.) play bolt open/close animation instead of fallback.</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_eject">
+        <text>Bolt-Action: Eject Round</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_eject_desc">
+        <text>Just like in real life. When cycling the bolt, eject one round from the magazine (adds to inventory). Requires "Cycle Bolt" to be enabled.</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_pump_rack">
         <text>Pump-Action: Rack Slide</text>
     </string>

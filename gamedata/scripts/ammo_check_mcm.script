@@ -21,6 +21,7 @@
 --   - Added "fake reload" mag inspect animation (taken & re-written from "OneKeyReload" mod)
 --   - Added custom weapons animation settings (for example, now Toz-34 Chimera Hunter also has a badass ammo check animation)
 --   - Added fake reload exclusion list (Mag Palming, etc. animations will be excluded)
+--   - Added "Eject round on bolt cyrcle" option
 
 --  @TODO:
 --   - No magazine fallback only works for weapons without mag inspect animation
@@ -68,6 +69,7 @@ local busy_hands_delay = 1.5
 local no_magazine_fallback = 1  -- 0: hide/show, 1: lower, 2: none (for Fake Reload mode when no magazine loaded)
 local fake_reload_fallback = 1  -- 0: hide/show, 1: lower (for internal mag weapons)
 local fake_reload_bolt_cycle = true  -- Enable bolt cycle for bolt-action rifles
+local fake_reload_bolt_eject = false -- Eject one round when cycling bolt (realism)
 local fake_reload_pump_rack = true   -- Enable pump rack for pump-action shotguns
 local fake_reload_ignore_list = true -- Use ignore list for non-immersive fake reloads
 local enable_animations = true       -- Master switch for all animations
@@ -82,12 +84,30 @@ local debug_mode = false
 local do_ammo_check_anim = nil  -- nil: not active, 1: started, 2: mutator applied
 local wpn_checking = nil        -- Weapon being checked
 local det_active = nil          -- Detector that was active before check
+local is_fake_reload = false    -- Flag to prevent auto-check duplicate after fake reload
 
 -- Animation timing constants --
 local FAKE_RELOAD_MSG_DELAY = 1.5       -- Delay before showing message after fake reload
 local BOLT_PUMP_MSG_OFFSET = 0.8        -- Additional delay offset for bolt/pump animations
 local AUTO_CHECK_DELAY = 0.15           -- Delay for auto-check after reload
 local RESTORE_DET_DELAY = 0.1           -- Delay before checking to restore detector
+
+-- Cached objects (GC optimization) --
+local ZERO_VECTOR = vector():set(0, 0, 0)  -- Reusable zero vector for sound positioning
+
+-- Debug mode numpad key mappings --
+local numpad_states = {
+    [DIK_keys.DIK_NUMPAD0] = 0,
+    [DIK_keys.DIK_NUMPAD1] = 1,
+    [DIK_keys.DIK_NUMPAD2] = 2,
+    [DIK_keys.DIK_NUMPAD3] = 3,
+    [DIK_keys.DIK_NUMPAD4] = 4,
+    [DIK_keys.DIK_NUMPAD5] = 5,
+    [DIK_keys.DIK_NUMPAD6] = 6,
+    [DIK_keys.DIK_NUMPAD7] = 7,
+    [DIK_keys.DIK_NUMPAD8] = 8,
+    [DIK_keys.DIK_NUMPAD9] = 9,
+}
 
 -- Caches --
 local ammo_type_cache = {}      -- Cache for ammo type classification
@@ -332,19 +352,6 @@ function on_key_press(key)
 
     -- Debug mode: Numpad keys 0-9 test weapon states
     if debug_mode then
-        local numpad_states = {
-            [DIK_keys.DIK_NUMPAD0] = 0,
-            [DIK_keys.DIK_NUMPAD1] = 1,
-            [DIK_keys.DIK_NUMPAD2] = 2,
-            [DIK_keys.DIK_NUMPAD3] = 3,
-            [DIK_keys.DIK_NUMPAD4] = 4,
-            [DIK_keys.DIK_NUMPAD5] = 5,
-            [DIK_keys.DIK_NUMPAD6] = 6,
-            [DIK_keys.DIK_NUMPAD7] = 7,
-            [DIK_keys.DIK_NUMPAD8] = 8,
-            [DIK_keys.DIK_NUMPAD9] = 9,
-        }
-        
         if numpad_states[key] then
             debug_test_state(numpad_states[key])
             return
@@ -353,6 +360,18 @@ function on_key_press(key)
         -- Numpad * lists animations
         if key == DIK_keys.DIK_MULTIPLY then
             debug_list_animations()
+            return
+        end
+        
+        -- Numpad + increases animation delay
+        if key == DIK_keys.DIK_ADD then
+            debug_adjust_delay(0.1)
+            return
+        end
+        
+        -- Numpad - decreases animation delay
+        if key == DIK_keys.DIK_SUBTRACT then
+            debug_adjust_delay(-0.1)
             return
         end
     end
@@ -847,6 +866,13 @@ function actor_on_hud_animation_end(item, section, motion, state, slot)
     if not item then return end
     if not IsWeapon(item) then return end
     
+    -- Skip if this was a fake reload (we already displayed the message)
+    if is_fake_reload then
+        print_dbg("Skipping auto-check: was fake reload")
+        is_fake_reload = false
+        return
+    end
+    
     -- Use case-insensitive pattern matching (avoids creating new string)
     -- Check reload first (most common case)
     if string_find(motion, "[Rr]eload") then
@@ -967,6 +993,8 @@ end
 -- When Debug Mode is ON:
 --   Numpad 0-9 = Test weapon state 0-9
 --   Numpad * = List all animations for current weapon
+--   Numpad + = Increase bolt/pump animation delay (+0.1s)
+--   Numpad - = Decrease bolt/pump animation delay (-0.1s)
 -- ============================================
 
 -- Debug: Test different weapon states
@@ -1023,6 +1051,38 @@ function debug_list_animations()
     printf("[AmmoCheck DEBUG] Weapon: %s | HUD: %s", sec, hud_section)
     for _, anm in ipairs(found) do
         printf("  [+] %s", anm)
+    end
+end
+
+-- Debug: Adjust animation delay for bolt/pump weapons
+function debug_adjust_delay(delta)
+    local weapon = db.actor and db.actor:active_item()
+    if not weapon or not IsWeapon(weapon) then
+        db.actor:give_game_news("AmmoCheck Debug", "No weapon active!", "ui_inGame2_D_Ohotnik_na_mutantov", 0, 3000, 0)
+        return
+    end
+    
+    local sec = weapon:section()
+    
+    if not ammo_check_weapons then
+        db.actor:give_game_news("AmmoCheck Debug", "Weapons config not loaded!", "ui_inGame2_D_Ohotnik_na_mutantov", 0, 3000, 0)
+        return
+    end
+    
+    if not ammo_check_weapons.adjust_delay then
+        db.actor:give_game_news("AmmoCheck Debug", "adjust_delay not available!", "ui_inGame2_D_Ohotnik_na_mutantov", 0, 3000, 0)
+        return
+    end
+    
+    local new_delay, weapon_type = ammo_check_weapons.adjust_delay(sec, delta)
+    
+    if new_delay then
+        local type_name = weapon_type == "bolt" and "Bolt-action" or "Pump-action"
+        local msg = string.format("%s delay: %.1fs", type_name, new_delay)
+        db.actor:give_game_news("AmmoCheck Debug", msg, "ui_inGame2_D_Ohotnik_na_mutantov", 0, 2000, 0)
+        printf("[AmmoCheck DEBUG] %s %s delay set to %.1fs", sec, weapon_type, new_delay)
+    else
+        db.actor:give_game_news("AmmoCheck Debug", "Weapon not in bolt/pump lists: " .. sec, "ui_inGame2_D_Ohotnik_na_mutantov", 0, 3000, 0)
     end
 end
 
@@ -1095,6 +1155,7 @@ function on_mcm_load()
                 }
             },
             { id = "fake_reload_bolt_cycle", type = "check", val = 1, def = true },
+            { id = "fake_reload_bolt_eject", type = "check", val = 1, def = false },
             { id = "fake_reload_pump_rack", type = "check", val = 1, def = true },
             { id = "fake_reload_ignore_list", type = "check", val = 1, def = true },
             { id = "busy_hands_delay", type = "track", val = 2, min = 0.5, max = 3, step = 0.25, def = 1.5 },
@@ -1165,12 +1226,14 @@ function on_option_change()
         fake_reload_fallback = ui_mcm.get("rax_ammo_check/fake_reload_fallback") or 1
         local bolt_val = ui_mcm.get("rax_ammo_check/fake_reload_bolt_cycle")
         fake_reload_bolt_cycle = (bolt_val == true or bolt_val == 1 or bolt_val == nil)  -- Default true
+        local bolt_eject_val = ui_mcm.get("rax_ammo_check/fake_reload_bolt_eject")
+        fake_reload_bolt_eject = (bolt_eject_val == true or bolt_eject_val == 1)  -- Default false
         local pump_val = ui_mcm.get("rax_ammo_check/fake_reload_pump_rack")
         fake_reload_pump_rack = (pump_val == true or pump_val == 1 or pump_val == nil)  -- Default true
         local ignore_val = ui_mcm.get("rax_ammo_check/fake_reload_ignore_list")
         fake_reload_ignore_list = (ignore_val == true or ignore_val == 1 or ignore_val == nil)  -- Default true
         busy_hands_delay = ui_mcm.get("rax_ammo_check/busy_hands_delay") or 1.5
-        print_dbg("Animation settings: enable=%s, anim_mode=%s, no_mag_fb=%s, fake_fb=%s, bolt=%s, pump=%s, ignore=%s", tostring(enable_animations), anim_mode, no_magazine_fallback, fake_reload_fallback, tostring(fake_reload_bolt_cycle), tostring(fake_reload_pump_rack), tostring(fake_reload_ignore_list))
+        print_dbg("Animation settings: enable=%s, anim_mode=%s, no_mag_fb=%s, fake_fb=%s, bolt=%s, bolt_eject=%s, pump=%s, ignore=%s", tostring(enable_animations), anim_mode, no_magazine_fallback, fake_reload_fallback, tostring(fake_reload_bolt_cycle), tostring(fake_reload_bolt_eject), tostring(fake_reload_pump_rack), tostring(fake_reload_ignore_list))
         
         -- Debug settings
         debug_mode = ui_mcm.get("rax_ammo_check/debug_mode")
@@ -1270,7 +1333,10 @@ end
 
 -- Restore ammo after fake reload animation completes --
 local function restore_ammo_after_reload(weapon, count, pre_table)
-    if not weapon then return true end
+    if not weapon then 
+        do_ammo_check_anim = nil  -- Clear flag even if weapon gone
+        return true 
+    end
     if weapon:get_state() == 0 then
         weapon:set_ammo_elapsed(count)
         -- Refund ammo if MagsRedux is installed and we have a valid pre_table
@@ -1284,6 +1350,10 @@ local function restore_ammo_after_reload(weapon, count, pre_table)
             db.actor:show_detector(true)
             det_active = nil
         end
+        
+        -- Clear animation flag
+        do_ammo_check_anim = nil
+        
         return true
     end
     return false
@@ -1303,7 +1373,7 @@ local function play_hud_animation(weapon, anim_name, sound_param)
         if sound_file and sound_file ~= "$no_sound" then
             local snd = sound_object(sound_file)
             if snd then
-                snd:play_no_feedback(db.actor, sound_object.s2d, 0, vector():set(0,0,0), 1.0, 1.0)
+                snd:play_no_feedback(db.actor, sound_object.s2d, 0, ZERO_VECTOR, 1.0, 1.0)
             end
         end
     end
@@ -1333,7 +1403,7 @@ local function play_close_animation(weapon, sound_param)
         if sound_file and sound_file ~= "$no_sound" then
             local snd = sound_object(sound_file)
             if snd then
-                snd:play_no_feedback(db.actor, sound_object.s2d, 0, vector():set(0,0,0), 1.0, 1.0)
+                snd:play_no_feedback(db.actor, sound_object.s2d, 0, ZERO_VECTOR, 1.0, 1.0)
             end
         end
     end
@@ -1363,7 +1433,7 @@ local function play_open_close_animation(weapon, delay_time)
     if open_sound and open_sound ~= "$no_sound" then
         local snd = sound_object(open_sound)
         if snd then
-            snd:play_no_feedback(db.actor, sound_object.s2d, 0, vector():set(0,0,0), 1.0, 1.0)
+            snd:play_no_feedback(db.actor, sound_object.s2d, 0, ZERO_VECTOR, 1.0, 1.0)
         end
     end
     
@@ -1656,6 +1726,9 @@ function check_Ammo(skip_animation)
                     -- Has magazine - play fake reload animation
                     print_dbg("Ammo check for %s - detachable mag weapon with mag, using fake reload animation.", sec)
                     
+                    do_ammo_check_anim = 1  -- Mark that we're doing our own animation
+                    is_fake_reload = true   -- Prevent auto-check duplicate
+                    
                     det_active = actor:active_detector() or nil
                     if det_active then
                         det_active:switch_state(2)
@@ -1699,6 +1772,9 @@ function check_Ammo(skip_animation)
         if break_config and has_animation(sec, break_config.anim) then
             print_dbg("Ammo check for %s - break-action, using %s animation.", sec, break_config.anim)
             
+            do_ammo_check_anim = 1  -- Mark that we're doing our own animation
+            is_fake_reload = true   -- Prevent auto-check duplicate
+            
             det_active = actor:active_detector() or nil
             if det_active then
                 det_active:switch_state(2)
@@ -1717,9 +1793,28 @@ function check_Ammo(skip_animation)
             if bolt_config and has_animation(sec, "anm_open") and has_animation(sec, "anm_close") then
                 print_dbg("Ammo check for %s - bolt-action, using open/close with %.2fs delay.", sec, bolt_config.delay)
                 
+                do_ammo_check_anim = 1  -- Mark that we're doing our own animation
+                is_fake_reload = true   -- Prevent auto-check duplicate
+                
                 det_active = actor:active_detector() or nil
                 if det_active then
                     det_active:switch_state(2)
+                end
+                
+                -- Eject one round if option enabled and there's ammo
+                if fake_reload_bolt_eject and currentAmmo > 0 then
+                    local ammo_section = get_vanilla_ammo_section(weapon)
+                    if ammo_section then
+                        -- Remove one round from magazine
+                        weapon:set_ammo_elapsed(currentAmmo - 1)
+                        -- Give round to player inventory
+                        alife_create_item(ammo_section, actor)
+                        print_dbg("Ejected round: %s (remaining: %d)", ammo_section, currentAmmo - 1)
+                        
+                        -- Update message to reflect new ammo count
+                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag = 
+                            get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
+                    end
                 end
                 
                 play_open_close_animation(weapon, bolt_config.delay)
@@ -1733,6 +1828,9 @@ function check_Ammo(skip_animation)
             local pump_config = get_pump_action_config(sec)
             if pump_config and has_animation(sec, "anm_open") and has_animation(sec, "anm_close") then
                 print_dbg("Ammo check for %s - pump-action, using open/close with %.2fs delay.", sec, pump_config.delay)
+                
+                do_ammo_check_anim = 1  -- Mark that we're doing our own animation
+                is_fake_reload = true   -- Prevent auto-check duplicate
                 
                 det_active = actor:active_detector() or nil
                 if det_active then

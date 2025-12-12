@@ -10,20 +10,23 @@
 -- - delay: Time in seconds between anm_open and anm_close
 -- - anim: Animation name to play
 -- - sound: Sound parameter from weapon config
+--
+-- HOT RELOAD (Debug Mode):
+-- Press Numpad / to reload this file without restarting the game.
 -- ============================================
 
 local string_find = string.find
 
 -- Cache for lookup results (cleared on game load)
-local config_cache = {}
+config_cache = {}
 
 
 -- ============================================
 -- Break-action shotguns
--- These use a custom animation (usually anm_bore)
+-- These use a custom animation (usually anm_bore or anm_idle)
 -- Format: [prefix] = { anim = "animation_name", sound = "sound_param" }
 -- ============================================
-local break_action_shotguns = {
+break_action_shotguns = {
     ["wpn_toz34"] = { anim = "anm_bore", sound = "snd_bore" }, -- badass Chimera Hunter ammo check animation
     -- ["wpn_izh43"] = { anim = "anm_bore", sound = "snd_bore" },
 }
@@ -34,9 +37,9 @@ local break_action_shotguns = {
 -- These play anm_open -> delay -> anm_close (bolt cycle)
 -- Format: [prefix] = { delay = seconds_between_open_and_close }
 -- ============================================
-local bolt_action_rifles = {
-    ["wpn_k98"] = { delay = 1.0 },
-    ["wpn_kar98"] = { delay = 0.7 },
+bolt_action_rifles = {
+    ["wpn_k98"] = { delay = 1.3 },
+
     ["wpn_springfield"] = { delay = 0.7 },
     ["wpn_m24"] = { delay = 0.8 },
     ["wpn_remington700"] = { delay = 0.7 },
@@ -54,8 +57,10 @@ local bolt_action_rifles = {
 -- These play anm_open -> delay -> anm_close (pump rack)
 -- Format: [prefix] = { delay = seconds_between_open_and_close }
 -- ============================================
-local pump_action_shotguns = {
+pump_action_shotguns = {
     ["wpn_ks23"] = { delay = 0.6 },
+    ["wpn_mp155"] = { delay = 0.8 },
+
     ["wpn_mossberg"] = { delay = 0.5 },
     ["wpn_remington870"] = { delay = 0.5 },
     ["wpn_spas12"] = { delay = 0.5 },
@@ -64,39 +69,47 @@ local pump_action_shotguns = {
     ["wpn_toz194"] = { delay = 0.5 },
     ["wpn_mp133"] = { delay = 0.5 },
     ["wpn_mp153"] = { delay = 0.5 },
-    ["wpn_mp155"] = { delay = 0.6 },
     -- ["wpn_winchester1897"] = { delay = 0.6 },
 }
 
 
 -- ============================================
 -- Ignore fake animations list
--- Weapons in this list will NEVER use fake reload animations,
+-- Weapons in this list will never use fake reload animations,
 -- regardless of the "Fake Reload" animation mode setting.
 -- They will fall back to the selected fallback behavior.
 -- Format: [prefix] = true
 -- * bruh probably should named it "ignore_fake_reload" .. but I'm too lazy boboo :3
 -- ============================================
-local ignore_fake_animations = {
-    -- Add weapons that should skip fake animations here:
+ignore_fake_animations = {
     ["wpn_g36ka4_rwap"] = true, -- Mag Palming (non-immersive)
     -- ["wpn_with_bad_anim"] = true,
 }
 
 
 -- ============================================
--- Internal lookup helper (with caching)
+-- Cache for lookup results (cleared on reload)
 -- ============================================
-function lookup_config(sec, weapon_table, cache_prefix)
+config_cache = {}
+
+-- ============================================
+-- Lookup Functions (called from main script)
+-- Each function has inlined lookup logic to avoid reference issues
+-- ============================================
+
+function get_break_action_config(sec)
+    if not sec then return nil end
+    
     -- Check cache first
-    local cache_key = cache_prefix .. sec
+    local cache_key = "break_" .. sec
     if config_cache[cache_key] ~= nil then
-        return config_cache[cache_key] or nil  -- false means "not found" in cache
+        if config_cache[cache_key] == false then return nil end
+        return config_cache[cache_key]
     end
     
     -- Search weapon table
-    for prefix, config in pairs(weapon_table) do
-        if sec == prefix or string_find(sec, "^" .. prefix) then
+    for prefix, config in pairs(break_action_shotguns) do
+        if sec == prefix or string.find(sec, "^" .. prefix) then
             config_cache[cache_key] = config
             return config
         end
@@ -107,25 +120,55 @@ function lookup_config(sec, weapon_table, cache_prefix)
     return nil
 end
 
-
--- ============================================
--- Lookup Functions (called from main script)
--- Returns config table if weapon matches, nil otherwise
--- ============================================
-
-function get_break_action_config(sec)
-    return lookup_config(sec, break_action_shotguns, "break_")
-end
-
 function get_bolt_action_config(sec)
-    return lookup_config(sec, bolt_action_rifles, "bolt_")
+    if not sec then return nil end
+    
+    -- Check cache first
+    local cache_key = "bolt_" .. sec
+    if config_cache[cache_key] ~= nil then
+        if config_cache[cache_key] == false then return nil end
+        return config_cache[cache_key]
+    end
+    
+    -- Search weapon table
+    for prefix, config in pairs(bolt_action_rifles) do
+        if sec == prefix or string.find(sec, "^" .. prefix) then
+            config_cache[cache_key] = config
+            return config
+        end
+    end
+    
+    -- Cache negative result
+    config_cache[cache_key] = false
+    return nil
 end
 
 function get_pump_action_config(sec)
-    return lookup_config(sec, pump_action_shotguns, "pump_")
+    if not sec then return nil end
+    
+    -- Check cache first
+    local cache_key = "pump_" .. sec
+    if config_cache[cache_key] ~= nil then
+        if config_cache[cache_key] == false then return nil end
+        return config_cache[cache_key]
+    end
+    
+    -- Search weapon table
+    for prefix, config in pairs(pump_action_shotguns) do
+        if sec == prefix or string.find(sec, "^" .. prefix) then
+            config_cache[cache_key] = config
+            return config
+        end
+    end
+    
+    -- Cache negative result
+    config_cache[cache_key] = false
+    return nil
 end
 
 function should_ignore_fake_animations(sec)
+    if not sec then return false end
+    
     -- Check cache first
     local cache_key = "ignore_" .. sec
     if config_cache[cache_key] ~= nil then
@@ -134,7 +177,7 @@ function should_ignore_fake_animations(sec)
     
     -- Search ignore list
     for prefix, _ in pairs(ignore_fake_animations) do
-        if sec == prefix or string_find(sec, "^" .. prefix) then
+        if sec == prefix or string.find(sec, "^" .. prefix) then
             config_cache[cache_key] = true
             return true
         end
@@ -145,7 +188,62 @@ function should_ignore_fake_animations(sec)
     return false
 end
 
--- Clear cache (can be called on game load if needed)
+-- ============================================
+-- Utility functions
+-- ============================================
+
+-- Clear cache (called on reload)
 function clear_config_cache()
     config_cache = {}
+end
+
+-- Adjust delay for a weapon (used by debug hotkeys)
+-- Returns: new_delay or nil if weapon not in lists
+function adjust_delay(sec, delta)
+    if not sec then return nil end
+    
+    -- Check bolt-action rifles
+    for prefix, config in pairs(bolt_action_rifles) do
+        if sec == prefix or string.find(sec, "^" .. prefix) then
+            config.delay = math.max(0.1, (config.delay or 0.5) + delta)
+            config.delay = math.floor(config.delay * 10 + 0.5) / 10  -- Round to 0.1
+            -- Clear cache for this weapon
+            config_cache["bolt_" .. sec] = nil
+            return config.delay, "bolt"
+        end
+    end
+    
+    -- Check pump-action shotguns
+    for prefix, config in pairs(pump_action_shotguns) do
+        if sec == prefix or string.find(sec, "^" .. prefix) then
+            config.delay = math.max(0.1, (config.delay or 0.5) + delta)
+            config.delay = math.floor(config.delay * 10 + 0.5) / 10  -- Round to 0.1
+            -- Clear cache for this weapon
+            config_cache["pump_" .. sec] = nil
+            return config.delay, "pump"
+        end
+    end
+    
+    return nil, nil
+end
+
+-- Get current delay for a weapon
+function get_current_delay(sec)
+    if not sec then return nil, nil end
+    
+    -- Check bolt-action rifles
+    for prefix, config in pairs(bolt_action_rifles) do
+        if sec == prefix or string.find(sec, "^" .. prefix) then
+            return config.delay, "bolt"
+        end
+    end
+    
+    -- Check pump-action shotguns
+    for prefix, config in pairs(pump_action_shotguns) do
+        if sec == prefix or string.find(sec, "^" .. prefix) then
+            return config.delay, "pump"
+        end
+    end
+    
+    return nil, nil
 end
