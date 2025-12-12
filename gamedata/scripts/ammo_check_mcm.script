@@ -376,6 +376,18 @@ function on_key_press(key)
             debug_adjust_delay(-0.1)
             return
         end
+        
+        -- Numpad / plays anm_bore
+        if key == DIK_keys.DIK_DIVIDE then
+            debug_play_animation("anm_bore")
+            return
+        end
+        
+        -- Numpad . plays anm_idle
+        if key == DIK_keys.DIK_DECIMAL then
+            debug_play_animation("anm_idle")
+            return
+        end
     end
 
     if key ~= mcm_key then return end
@@ -997,6 +1009,8 @@ end
 --   Numpad * = List all animations for current weapon
 --   Numpad + = Increase bolt/pump animation delay (+0.1s)
 --   Numpad - = Decrease bolt/pump animation delay (-0.1s)
+--   Numpad / = Play anm_bore animation
+--   Numpad . = Play anm_idle animation
 -- ============================================
 
 -- Debug: Test different weapon states
@@ -1086,6 +1100,37 @@ function debug_adjust_delay(delta)
     else
         db.actor:give_game_news("AmmoCheck Debug", "Weapon not in bolt/pump lists: " .. sec, "ui_inGame2_D_Ohotnik_na_mutantov", 0, 3000, 0)
     end
+end
+
+function debug_play_animation(anim_name)
+    local weapon = db.actor and db.actor:active_item()
+    if not weapon or not IsWeapon(weapon) then
+        db.actor:give_game_news("AmmoCheck Debug", "No weapon active!", "ui_inGame2_D_Ohotnik_na_mutantov", 0, 3000, 0)
+        return
+    end
+    
+    local sec = weapon:section()
+    
+    -- Check if weapon has this animation
+    local hud_sec = ini_sys:r_string_ex(sec, "hud")
+    if not hud_sec then
+        db.actor:give_game_news("AmmoCheck Debug", "No HUD section for: " .. sec, "ui_inGame2_D_Ohotnik_na_mutantov", 0, 3000, 0)
+        return
+    end
+    
+    local anim_exists = ini_sys:r_string_ex(hud_sec, anim_name)
+    if not anim_exists then
+        local msg = string.format("%s: no '%s' animation", sec, anim_name)
+        db.actor:give_game_news("AmmoCheck Debug", msg, "ui_inGame2_D_Ohotnik_na_mutantov", 0, 3000, 0)
+        return
+    end
+    
+    -- Play the animation
+    weapon:play_hud_motion(anim_name, true, 0, 1, 0)
+    
+    local msg = string.format("Playing '%s' on %s", anim_name, sec)
+    db.actor:give_game_news("AmmoCheck Debug", msg, "ui_inGame2_D_Ohotnik_na_mutantov", 0, 2000, 0)
+    printf("[AmmoCheck DEBUG] %s", msg)
 end
 
 -- MCM Configuration --
@@ -1585,6 +1630,27 @@ local function get_pump_action_config(sec)
     return nil
 end
 
+local function get_pistol_smg_config(sec)
+    if ammo_check_weapons and ammo_check_weapons.get_pistol_smg_config then
+        return ammo_check_weapons.get_pistol_smg_config(sec)
+    end
+    return nil
+end
+
+local function get_rifle_config(sec)
+    if ammo_check_weapons and ammo_check_weapons.get_rifle_config then
+        return ammo_check_weapons.get_rifle_config(sec)
+    end
+    return nil
+end
+
+local function get_sniper_config(sec)
+    if ammo_check_weapons and ammo_check_weapons.get_sniper_config then
+        return ammo_check_weapons.get_sniper_config(sec)
+    end
+    return nil
+end
+
 local function should_ignore_fake_animations(sec)
     if ammo_check_weapons and ammo_check_weapons.should_ignore_fake_animations then
         return ammo_check_weapons.should_ignore_fake_animations(sec)
@@ -1735,7 +1801,43 @@ function check_Ammo(skip_animation)
                 local current_magazine = get_mag_loaded(weaponId)
                 
                 if current_magazine then
-                    -- Has magazine - play fake reload animation
+                    -- Before using fake reload, check if weapon has custom animation override
+                    local custom_config = get_pistol_smg_config(sec) or get_rifle_config(sec) or get_sniper_config(sec)
+                    
+                    if custom_config then
+                        if custom_config.anim and has_animation(sec, custom_config.anim) then
+                            print_dbg("Ammo check for %s - using custom %s animation (override).", sec, custom_config.anim)
+                            
+                            do_ammo_check_anim = 1
+                            is_fake_reload = true
+                            
+                            det_active = actor:active_detector() or nil
+                            if det_active then
+                                det_active:switch_state(2)
+                            end
+                            
+                            play_hud_animation(weapon, custom_config.anim, custom_config.sound)
+                            CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+                            CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
+                            return
+                        elseif custom_config.delay and has_animation(sec, "anm_open") and has_animation(sec, "anm_close") then
+                            print_dbg("Ammo check for %s - using open/close with %.2fs delay (override).", sec, custom_config.delay)
+                            
+                            do_ammo_check_anim = 1
+                            is_fake_reload = true
+                            
+                            det_active = actor:active_detector() or nil
+                            if det_active then
+                                det_active:switch_state(2)
+                            end
+                            
+                            play_open_close_animation(weapon, custom_config.delay)
+                            CreateTimeEvent("ammo_check", "message_delay", custom_config.delay + BOLT_PUMP_MSG_OFFSET, delayed_display_callback)
+                            return
+                        end
+                    end
+                    
+                    -- Has magazine, no custom override - play fake reload animation
                     print_dbg("Ammo check for %s - detachable mag weapon with mag, using fake reload animation.", sec)
                     
                     do_ammo_check_anim = 1  -- Mark that we're doing our own animation
@@ -1802,71 +1904,232 @@ function check_Ammo(skip_animation)
         -- Check 2: Bolt-action rifle (if MCM option enabled)
         if fake_reload_bolt_cycle then
             local bolt_config = get_bolt_action_config(sec)
-            if bolt_config and has_animation(sec, "anm_open") and has_animation(sec, "anm_close") then
-                print_dbg("Ammo check for %s - bolt-action, using open/close with %.2fs delay.", sec, bolt_config.delay)
-                
-                do_ammo_check_anim = 1  -- Mark that we're doing our own animation
-                is_fake_reload = true   -- Prevent auto-check duplicate
-                
-                det_active = actor:active_detector() or nil
-                if det_active then
-                    det_active:switch_state(2)
-                end
-                
-                -- Eject one round if option enabled and there's ammo
-                if fake_reload_bolt_eject and currentAmmo > 0 then
-                    local ammo_section = get_vanilla_ammo_section(weapon)
-                    if ammo_section then
-                        -- Remove one round from magazine
-                        weapon:set_ammo_elapsed(currentAmmo - 1)
-                        -- Give round to player inventory
-                        alife_create_item(ammo_section, actor)
-                        print_dbg("Ejected round: %s (remaining: %d)", ammo_section, currentAmmo - 1)
-                        
-                        -- Update message to reflect new ammo count
-                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag = 
-                            get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
+            if bolt_config then
+                -- Check if custom animation is specified
+                if bolt_config.anim and has_animation(sec, bolt_config.anim) then
+                    print_dbg("Ammo check for %s - bolt-action, using custom %s animation.", sec, bolt_config.anim)
+                    
+                    do_ammo_check_anim = 1  -- Mark that we're doing our own animation
+                    is_fake_reload = true   -- Prevent auto-check duplicate
+                    
+                    det_active = actor:active_detector() or nil
+                    if det_active then
+                        det_active:switch_state(2)
                     end
+                    
+                    -- Eject one round if option enabled and there's ammo
+                    if fake_reload_bolt_eject and currentAmmo > 0 then
+                        local ammo_section = get_vanilla_ammo_section(weapon)
+                        if ammo_section then
+                            weapon:set_ammo_elapsed(currentAmmo - 1)
+                            alife_create_item(ammo_section, actor)
+                            print_dbg("Ejected round: %s (remaining: %d)", ammo_section, currentAmmo - 1)
+                            ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag = 
+                                get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
+                        end
+                    end
+                    
+                    play_hud_animation(weapon, bolt_config.anim, bolt_config.sound)
+                    CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+                    CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
+                    return
+                    
+                -- Otherwise use default anm_open -> delay -> anm_close
+                elseif bolt_config.delay and has_animation(sec, "anm_open") and has_animation(sec, "anm_close") then
+                    print_dbg("Ammo check for %s - bolt-action, using open/close with %.2fs delay.", sec, bolt_config.delay)
+                    
+                    do_ammo_check_anim = 1  -- Mark that we're doing our own animation
+                    is_fake_reload = true   -- Prevent auto-check duplicate
+                    
+                    det_active = actor:active_detector() or nil
+                    if det_active then
+                        det_active:switch_state(2)
+                    end
+                    
+                    -- Eject one round if option enabled and there's ammo
+                    if fake_reload_bolt_eject and currentAmmo > 0 then
+                        local ammo_section = get_vanilla_ammo_section(weapon)
+                        if ammo_section then
+                            weapon:set_ammo_elapsed(currentAmmo - 1)
+                            alife_create_item(ammo_section, actor)
+                            print_dbg("Ejected round: %s (remaining: %d)", ammo_section, currentAmmo - 1)
+                            ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag = 
+                                get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
+                        end
+                    end
+                    
+                    play_open_close_animation(weapon, bolt_config.delay)
+                    CreateTimeEvent("ammo_check", "message_delay", bolt_config.delay + BOLT_PUMP_MSG_OFFSET, delayed_display_callback)
+                    return
                 end
-                
-                play_open_close_animation(weapon, bolt_config.delay)
-                CreateTimeEvent("ammo_check", "message_delay", bolt_config.delay + BOLT_PUMP_MSG_OFFSET, delayed_display_callback)
-                return
             end
         end
         
         -- Check 3: Pump-action shotgun (if MCM option enabled)
         if fake_reload_pump_rack then
             local pump_config = get_pump_action_config(sec)
-            if pump_config and has_animation(sec, "anm_open") and has_animation(sec, "anm_close") then
-                print_dbg("Ammo check for %s - pump-action, using open/close with %.2fs delay.", sec, pump_config.delay)
+            if pump_config then
+                -- Check if custom animation is specified
+                if pump_config.anim and has_animation(sec, pump_config.anim) then
+                    print_dbg("Ammo check for %s - pump-action, using custom %s animation.", sec, pump_config.anim)
+                    
+                    do_ammo_check_anim = 1  -- Mark that we're doing our own animation
+                    is_fake_reload = true   -- Prevent auto-check duplicate
+                    
+                    det_active = actor:active_detector() or nil
+                    if det_active then
+                        det_active:switch_state(2)
+                    end
+                    
+                    -- Eject one shell if option enabled, there's ammo, and weapon not excluded
+                    if fake_reload_pump_eject and currentAmmo > 0 and not should_exclude_shell_eject(sec) then
+                        local ammo_section = get_vanilla_ammo_section(weapon)
+                        if ammo_section then
+                            weapon:set_ammo_elapsed(currentAmmo - 1)
+                            alife_create_item(ammo_section, actor)
+                            print_dbg("Ejected shell: %s (remaining: %d)", ammo_section, currentAmmo - 1)
+                            ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag = 
+                                get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
+                        end
+                    end
+                    
+                    play_hud_animation(weapon, pump_config.anim, pump_config.sound)
+                    CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+                    CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
+                    return
+                    
+                -- Otherwise use default anm_open -> delay -> anm_close
+                elseif pump_config.delay and has_animation(sec, "anm_open") and has_animation(sec, "anm_close") then
+                    print_dbg("Ammo check for %s - pump-action, using open/close with %.2fs delay.", sec, pump_config.delay)
+                    
+                    do_ammo_check_anim = 1  -- Mark that we're doing our own animation
+                    is_fake_reload = true   -- Prevent auto-check duplicate
+                    
+                    det_active = actor:active_detector() or nil
+                    if det_active then
+                        det_active:switch_state(2)
+                    end
+                    
+                    -- Eject one shell if option enabled, there's ammo, and weapon not excluded
+                    if fake_reload_pump_eject and currentAmmo > 0 and not should_exclude_shell_eject(sec) then
+                        local ammo_section = get_vanilla_ammo_section(weapon)
+                        if ammo_section then
+                            weapon:set_ammo_elapsed(currentAmmo - 1)
+                            alife_create_item(ammo_section, actor)
+                            print_dbg("Ejected shell: %s (remaining: %d)", ammo_section, currentAmmo - 1)
+                            ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag = 
+                                get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
+                        end
+                    end
+                    
+                    play_open_close_animation(weapon, pump_config.delay)
+                    CreateTimeEvent("ammo_check", "message_delay", pump_config.delay + BOLT_PUMP_MSG_OFFSET, delayed_display_callback)
+                    return
+                end
+            end
+        end
+        
+        -- Check 4: Pistol/SMG with custom animation
+        local pistol_config = get_pistol_smg_config(sec)
+        if pistol_config then
+            if pistol_config.anim and has_animation(sec, pistol_config.anim) then
+                print_dbg("Ammo check for %s - pistol/smg, using custom %s animation.", sec, pistol_config.anim)
                 
-                do_ammo_check_anim = 1  -- Mark that we're doing our own animation
-                is_fake_reload = true   -- Prevent auto-check duplicate
+                do_ammo_check_anim = 1
+                is_fake_reload = true
                 
                 det_active = actor:active_detector() or nil
                 if det_active then
                     det_active:switch_state(2)
                 end
                 
-                -- Eject one shell if option enabled, there's ammo, and weapon not excluded
-                if fake_reload_pump_eject and currentAmmo > 0 and not should_exclude_shell_eject(sec) then
-                    local ammo_section = get_vanilla_ammo_section(weapon)
-                    if ammo_section then
-                        -- Remove one round from magazine
-                        weapon:set_ammo_elapsed(currentAmmo - 1)
-                        -- Give round to player inventory
-                        alife_create_item(ammo_section, actor)
-                        print_dbg("Ejected shell: %s (remaining: %d)", ammo_section, currentAmmo - 1)
-                        
-                        -- Update message to reflect new ammo count
-                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag = 
-                            get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
-                    end
+                play_hud_animation(weapon, pistol_config.anim, pistol_config.sound)
+                CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+                CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
+                return
+            elseif pistol_config.delay and has_animation(sec, "anm_open") and has_animation(sec, "anm_close") then
+                print_dbg("Ammo check for %s - pistol/smg, using open/close with %.2fs delay.", sec, pistol_config.delay)
+                
+                do_ammo_check_anim = 1
+                is_fake_reload = true
+                
+                det_active = actor:active_detector() or nil
+                if det_active then
+                    det_active:switch_state(2)
                 end
                 
-                play_open_close_animation(weapon, pump_config.delay)
-                CreateTimeEvent("ammo_check", "message_delay", pump_config.delay + BOLT_PUMP_MSG_OFFSET, delayed_display_callback)
+                play_open_close_animation(weapon, pistol_config.delay)
+                CreateTimeEvent("ammo_check", "message_delay", pistol_config.delay + BOLT_PUMP_MSG_OFFSET, delayed_display_callback)
+                return
+            end
+        end
+        
+        -- Check 5: Rifle with custom animation
+        local rifle_config = get_rifle_config(sec)
+        if rifle_config then
+            if rifle_config.anim and has_animation(sec, rifle_config.anim) then
+                print_dbg("Ammo check for %s - rifle, using custom %s animation.", sec, rifle_config.anim)
+                
+                do_ammo_check_anim = 1
+                is_fake_reload = true
+                
+                det_active = actor:active_detector() or nil
+                if det_active then
+                    det_active:switch_state(2)
+                end
+                
+                play_hud_animation(weapon, rifle_config.anim, rifle_config.sound)
+                CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+                CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
+                return
+            elseif rifle_config.delay and has_animation(sec, "anm_open") and has_animation(sec, "anm_close") then
+                print_dbg("Ammo check for %s - rifle, using open/close with %.2fs delay.", sec, rifle_config.delay)
+                
+                do_ammo_check_anim = 1
+                is_fake_reload = true
+                
+                det_active = actor:active_detector() or nil
+                if det_active then
+                    det_active:switch_state(2)
+                end
+                
+                play_open_close_animation(weapon, rifle_config.delay)
+                CreateTimeEvent("ammo_check", "message_delay", rifle_config.delay + BOLT_PUMP_MSG_OFFSET, delayed_display_callback)
+                return
+            end
+        end
+        
+        -- Check 6: Sniper rifle with custom animation
+        local sniper_config = get_sniper_config(sec)
+        if sniper_config then
+            if sniper_config.anim and has_animation(sec, sniper_config.anim) then
+                print_dbg("Ammo check for %s - sniper, using custom %s animation.", sec, sniper_config.anim)
+                
+                do_ammo_check_anim = 1
+                is_fake_reload = true
+                
+                det_active = actor:active_detector() or nil
+                if det_active then
+                    det_active:switch_state(2)
+                end
+                
+                play_hud_animation(weapon, sniper_config.anim, sniper_config.sound)
+                CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+                CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
+                return
+            elseif sniper_config.delay and has_animation(sec, "anm_open") and has_animation(sec, "anm_close") then
+                print_dbg("Ammo check for %s - sniper, using open/close with %.2fs delay.", sec, sniper_config.delay)
+                
+                do_ammo_check_anim = 1
+                is_fake_reload = true
+                
+                det_active = actor:active_detector() or nil
+                if det_active then
+                    det_active:switch_state(2)
+                end
+                
+                play_open_close_animation(weapon, sniper_config.delay)
+                CreateTimeEvent("ammo_check", "message_delay", sniper_config.delay + BOLT_PUMP_MSG_OFFSET, delayed_display_callback)
                 return
             end
         end

@@ -11,8 +11,11 @@
 -- - anim: Animation name to play
 -- - sound: Sound parameter from weapon config
 --
--- HOT RELOAD (Debug Mode):
--- Press Numpad / to reload this file without restarting the game.
+-- DEBUG MODE KEYS:
+-- Numpad +/- = Adjust bolt/pump animation delay in real-time
+-- Numpad /   = Play anm_bore animation
+-- Numpad .   = Play anm_idle animation
+-- Numpad *   = List all animations for current weapon
 -- ============================================
 
 local string_find = string.find
@@ -28,6 +31,7 @@ config_cache = {}
 -- ============================================
 break_action_shotguns = {
     ["wpn_toz34"] = { anim = "anm_bore", sound = "snd_bore" }, -- badass Chimera Hunter ammo check animation
+
     -- ["wpn_izh43"] = { anim = "anm_bore", sound = "snd_bore" },
 }
 
@@ -39,15 +43,22 @@ break_action_shotguns = {
 -- ============================================
 bolt_action_rifles = {
     ["wpn_k98"] = { delay = 1.3 },
+    ["wpn_shiv"] = { delay = 1.2 },
+    ["wpn_obrez"] = { delay = 1.2 }, -- mosin obrez
+    ["wpn_mosin_carbine"] = { delay = 1.2 }, -- mosin (from Kmack "Mosin Trio" mod)
+    ["wpn_mosin_k"] = { delay = 1.3 }, -- mosin (from Kmack "Mosin Trio" mod)
 
-    ["wpn_springfield"] = { delay = 0.7 },
-    ["wpn_m24"] = { delay = 0.8 },
-    ["wpn_remington700"] = { delay = 0.7 },
-    ["wpn_cz550"] = { delay = 0.7 },
-    ["wpn_scout"] = { delay = 0.6 },
-    ["wpn_sks"] = { delay = 0.5 },
-    ["wpn_sv98"] = { delay = 0.7 },
-    ["wpn_svd"] = { delay = 0.6 },
+    ["wpn_sks_molot"] = { delay = 1.3 },
+
+
+    -- ["wpn_springfield"] = { delay = 0.7 },
+    -- ["wpn_m24"] = { delay = 0.8 },
+    -- ["wpn_remington700"] = { delay = 0.7 },
+    -- ["wpn_cz550"] = { delay = 0.7 },
+    -- ["wpn_scout"] = { delay = 0.6 },
+    -- ["wpn_sks"] = { delay = 0.5 },
+    -- ["wpn_sv98"] = { delay = 0.7 },
+    -- ["wpn_svd"] = { delay = 0.6 },
     -- ["wpn_mosin"] = { delay = 0.8 },
 }
 
@@ -60,16 +71,83 @@ bolt_action_rifles = {
 pump_action_shotguns = {
     ["wpn_ks23"] = { delay = 0.6 },
     ["wpn_mp155"] = { delay = 0.8 },
-
-    ["wpn_mossberg"] = { delay = 0.5 },
-    ["wpn_remington870"] = { delay = 0.5 },
-    ["wpn_spas12"] = { delay = 0.5 },
-    ["wpn_m1014"] = { delay = 0.4 },
-    ["wpn_protecta"] = { delay = 0.4 },
-    ["wpn_toz194"] = { delay = 0.5 },
+    -- ["wpn_ithacam37"] = { delay = 0.5 },
     ["wpn_mp133"] = { delay = 0.5 },
     ["wpn_mp153"] = { delay = 0.5 },
+
+    -- ["wpn_remington870"] = { delay = 0.5 },
+    ["wpn_fort500"] = { delay = 0.7 },
+    -- ["wpn_wincheaster1300"] = { delay = 0.6 },
+
+    ["wpn_remington870"] = { anim = "anm_bore", sound = "snd_bore" }, -- bore animation fits better
+    ["wpn_ithacam37"] = { anim = "anm_bore", sound = "snd_bore" }, -- bore animation fits better
+    ["wpn_wincheaster1300"] = { anim = "anm_bore", sound = "snd_bore" }, -- bore animation fits better
+
+    -- ["wpn_mossberg"] = { delay = 0.5 },
+    -- ["wpn_spas12"] = { delay = 0.5 },
+    -- ["wpn_m1014"] = { delay = 0.4 },
+    -- ["wpn_protecta"] = { delay = 0.4 },
+    -- ["wpn_toz194"] = { delay = 0.5 },
     -- ["wpn_winchester1897"] = { delay = 0.6 },
+}
+
+
+-- ============================================
+-- Pistols and SMGs
+-- Custom animation overrides for pistols and submachine guns.
+-- Use this when fake reload animation doesn't look good.
+-- Format: [prefix] = { delay = seconds } (for open/close cycle)
+--     OR: [prefix] = { anim = "animation_name", sound = "sound_param" } (for custom anim)
+-- ============================================
+pistol_smg_animations = {
+    ["wpn_aps_bas"] = { anim = "anm_reload", sound = "snd_reload" },
+    ["wpn_aps"] = { anim = "anm_bore", sound = "snd_bore" }, -- this one has proper mag inspect animation (anm_bore)
+    ["wpn_gsh18"] = { anim = "anm_bore", sound = "snd_reload" }, -- this one has proper mag inspect animation (anm_bore)
+    ["wpn_pb"] = { anim = "anm_bore", sound = "snd_reload" }, -- this one has proper mag inspect animation (anm_bore)
+    ["wpn_pm_bas"] = { anim = "anm_reload", sound = "snd_reload" },
+    ["wpn_pm"] = { anim = "anm_bore", sound = "snd_reload" }, -- this one has proper mag inspect animation (anm_bore)
+    ["wpn_pmm_bas"] = { anim = "anm_reload", sound = "snd_reload" },
+    ["wpn_pmm"] = { anim = "anm_bore", sound = "snd_reload" }, -- this one has proper mag inspect animation (anm_bore)
+
+    ["wpn_vz61"] = { anim = "anm_bore", sound = "snd_bore" }, -- don't play anim without this
+    -- ["wpn_aps"] = { anim = "anm_bore", sound = "snd_bore" },
+    -- ["wpn_mp5"] = { delay = 0.4 },
+}
+
+
+-- ============================================
+-- Assault Rifles
+-- Custom animation overrides for assault rifles.
+-- Use this when fake reload animation doesn't look good.
+-- Format: [prefix] = { delay = seconds } (for open/close cycle)
+--     OR: [prefix] = { anim = "animation_name", sound = "sound_param" } (for custom anim)
+-- ============================================
+rifle_animations = {
+    ["wpn_dtmdr"] = { anim = "anm_reload", sound = "snd_reload" },
+    ["wpn_val_tac"] = { anim = "anm_reload", sound = "snd_reload" },
+    ["wpn_val"] = { anim = "anm_bore", sound = "snd_bore" }, -- this one has proper mag inspect animation (anm_bore)
+
+    -- ["wpn_ak74"] = { anim = "anm_bore", sound = "snd_bore" },
+    -- ["wpn_m4"] = { delay = 0.4 },
+}
+
+
+-- ============================================
+-- Sniper Rifles (non bolt-action)
+-- Custom animation overrides for semi-auto sniper rifles.
+-- Use this when fake reload animation doesn't look good.
+-- Format: [prefix] = { delay = seconds } (for open/close cycle)
+--     OR: [prefix] = { anim = "animation_name", sound = "sound_param" } (for custom anim)
+-- ============================================
+sniper_animations = {
+    ["wpn_m98b"] = { anim = "anm_reload", sound = "snd_reload" },
+    ["wpn_svu"] = { anim = "anm_reload", sound = "snd_reload" },
+    ["wpn_vssk"] = { anim = "anm_ammo_check", sound = "snd_ammo_check" },
+
+    ["wpn_gauss"] = { anim = "anm_reload", sound = "snd_reload" },
+
+    -- ["wpn_svu"] = { anim = "anm_bore", sound = "snd_bore" },
+    -- ["wpn_wa2000"] = { delay = 0.5 },
 }
 
 
@@ -83,6 +161,17 @@ pump_action_shotguns = {
 -- ============================================
 ignore_fake_animations = {
     ["wpn_g36ka4_rwap"] = true, -- Mag Palming (non-immersive)
+    ["wpn_g36c_rwap"] = true, -- Mag Palming (non-immersive)
+    ["wpn_g36k_rwap"] = true, -- Mag Palming (non-immersive)
+    ["wpn_g36nimble_rwap"] = true, -- Mag Palming (non-immersive)
+    ["wpn_g36v_rwap"] = true, -- Mag Palming (non-immersive)
+    ["wpn_mp443"] = true, -- Mag Palming (non-immersive)
+    ["wpn_sig550_sniper"] = true, -- Mag Palming (non-immersive)
+    ["wpn_sig550"] = true, -- Mag Palming (non-immersive)
+    ["wpn_sig552"] = true, -- Mag Palming (non-immersive)
+    ["wpn_cz75"] = true, -- drops magazine (non-immersive)
+    ["wpn_m16"] = true, -- drops magazine (non-immersive)
+    ["wpn_vintorez_nimble"] = true, -- drops magazine (non-immersive)
     -- ["wpn_with_bad_anim"] = true,
 }
 
@@ -98,6 +187,10 @@ ignore_fake_animations = {
 eject_shell_exclude = {
     ["wpn_ks23"] = true, -- doesn't use rack slide animation
     ["wpn_mp155"] = true, -- doesn't use rack slide animation
+    ["wpn_ithacam37"] = true, -- doesn't use rack slide animation
+
+    -- ["wpn_remington870"] = true, -- shell stop
+    -- ["wpn_wincheaster1300"] = true, -- shell stop (toz 194)
 
     -- ["wpn_protecta"] = true,  -- Rotary magazine
     -- ["wpn_saiga"] = true,     -- Box magazine
@@ -112,7 +205,32 @@ config_cache = {}
 -- ============================================
 -- Lookup Functions (called from main script)
 -- Each function has inlined lookup logic to avoid reference issues
+-- Uses longest-prefix matching to handle cases like wpn_aps vs wpn_aps_bas
 -- ============================================
+
+-- Helper: Find best (longest) matching prefix in a table
+local function find_best_match(sec, weapon_table)
+    local best_prefix = nil
+    local best_config = nil
+    local best_len = 0
+    
+    for prefix, config in pairs(weapon_table) do
+        if sec == prefix then
+            -- Exact match - return immediately
+            return config
+        elseif string.find(sec, "^" .. prefix) then
+            -- Prefix match - keep if longer than previous best
+            local len = string.len(prefix)
+            if len > best_len then
+                best_len = len
+                best_prefix = prefix
+                best_config = config
+            end
+        end
+    end
+    
+    return best_config
+end
 
 function get_break_action_config(sec)
     if not sec then return nil end
@@ -124,12 +242,11 @@ function get_break_action_config(sec)
         return config_cache[cache_key]
     end
     
-    -- Search weapon table
-    for prefix, config in pairs(break_action_shotguns) do
-        if sec == prefix or string.find(sec, "^" .. prefix) then
-            config_cache[cache_key] = config
-            return config
-        end
+    -- Search weapon table (longest prefix match)
+    local config = find_best_match(sec, break_action_shotguns)
+    if config then
+        config_cache[cache_key] = config
+        return config
     end
     
     -- Cache negative result
@@ -147,12 +264,11 @@ function get_bolt_action_config(sec)
         return config_cache[cache_key]
     end
     
-    -- Search weapon table
-    for prefix, config in pairs(bolt_action_rifles) do
-        if sec == prefix or string.find(sec, "^" .. prefix) then
-            config_cache[cache_key] = config
-            return config
-        end
+    -- Search weapon table (longest prefix match)
+    local config = find_best_match(sec, bolt_action_rifles)
+    if config then
+        config_cache[cache_key] = config
+        return config
     end
     
     -- Cache negative result
@@ -170,12 +286,77 @@ function get_pump_action_config(sec)
         return config_cache[cache_key]
     end
     
-    -- Search weapon table
-    for prefix, config in pairs(pump_action_shotguns) do
-        if sec == prefix or string.find(sec, "^" .. prefix) then
-            config_cache[cache_key] = config
-            return config
-        end
+    -- Search weapon table (longest prefix match)
+    local config = find_best_match(sec, pump_action_shotguns)
+    if config then
+        config_cache[cache_key] = config
+        return config
+    end
+    
+    -- Cache negative result
+    config_cache[cache_key] = false
+    return nil
+end
+
+function get_pistol_smg_config(sec)
+    if not sec then return nil end
+    
+    -- Check cache first
+    local cache_key = "pistol_" .. sec
+    if config_cache[cache_key] ~= nil then
+        if config_cache[cache_key] == false then return nil end
+        return config_cache[cache_key]
+    end
+    
+    -- Search weapon table (longest prefix match)
+    local config = find_best_match(sec, pistol_smg_animations)
+    if config then
+        config_cache[cache_key] = config
+        return config
+    end
+    
+    -- Cache negative result
+    config_cache[cache_key] = false
+    return nil
+end
+
+function get_rifle_config(sec)
+    if not sec then return nil end
+    
+    -- Check cache first
+    local cache_key = "rifle_" .. sec
+    if config_cache[cache_key] ~= nil then
+        if config_cache[cache_key] == false then return nil end
+        return config_cache[cache_key]
+    end
+    
+    -- Search weapon table (longest prefix match)
+    local config = find_best_match(sec, rifle_animations)
+    if config then
+        config_cache[cache_key] = config
+        return config
+    end
+    
+    -- Cache negative result
+    config_cache[cache_key] = false
+    return nil
+end
+
+function get_sniper_config(sec)
+    if not sec then return nil end
+    
+    -- Check cache first
+    local cache_key = "sniper_" .. sec
+    if config_cache[cache_key] ~= nil then
+        if config_cache[cache_key] == false then return nil end
+        return config_cache[cache_key]
+    end
+    
+    -- Search weapon table (longest prefix match)
+    local config = find_best_match(sec, sniper_animations)
+    if config then
+        config_cache[cache_key] = config
+        return config
     end
     
     -- Cache negative result
@@ -241,26 +422,53 @@ end
 function adjust_delay(sec, delta)
     if not sec then return nil end
     
-    -- Check bolt-action rifles
+    -- Find best match in bolt-action rifles
+    local best_prefix = nil
+    local best_config = nil
+    local best_len = 0
+    local best_type = nil
+    
     for prefix, config in pairs(bolt_action_rifles) do
-        if sec == prefix or string.find(sec, "^" .. prefix) then
-            config.delay = math.max(0.1, (config.delay or 0.5) + delta)
-            config.delay = math.floor(config.delay * 10 + 0.5) / 10  -- Round to 0.1
-            -- Clear cache for this weapon
-            config_cache["bolt_" .. sec] = nil
-            return config.delay, "bolt"
+        if sec == prefix then
+            best_prefix = prefix
+            best_config = config
+            best_type = "bolt"
+            break
+        elseif string.find(sec, "^" .. prefix) then
+            local len = string.len(prefix)
+            if len > best_len then
+                best_len = len
+                best_prefix = prefix
+                best_config = config
+                best_type = "bolt"
+            end
         end
     end
     
-    -- Check pump-action shotguns
+    -- Check pump-action shotguns (may find longer match)
     for prefix, config in pairs(pump_action_shotguns) do
-        if sec == prefix or string.find(sec, "^" .. prefix) then
-            config.delay = math.max(0.1, (config.delay or 0.5) + delta)
-            config.delay = math.floor(config.delay * 10 + 0.5) / 10  -- Round to 0.1
-            -- Clear cache for this weapon
-            config_cache["pump_" .. sec] = nil
-            return config.delay, "pump"
+        if sec == prefix then
+            best_prefix = prefix
+            best_config = config
+            best_type = "pump"
+            break
+        elseif string.find(sec, "^" .. prefix) then
+            local len = string.len(prefix)
+            if len > best_len then
+                best_len = len
+                best_prefix = prefix
+                best_config = config
+                best_type = "pump"
+            end
         end
+    end
+    
+    if best_config and best_config.delay then
+        best_config.delay = math.max(0.1, (best_config.delay or 0.5) + delta)
+        best_config.delay = math.floor(best_config.delay * 10 + 0.5) / 10  -- Round to 0.1
+        -- Clear cache for this weapon
+        config_cache[best_type .. "_" .. sec] = nil
+        return best_config.delay, best_type
     end
     
     return nil, nil
@@ -270,18 +478,40 @@ end
 function get_current_delay(sec)
     if not sec then return nil, nil end
     
-    -- Check bolt-action rifles
+    -- Find best match in bolt-action rifles
+    local best_config = nil
+    local best_len = 0
+    local best_type = nil
+    
     for prefix, config in pairs(bolt_action_rifles) do
-        if sec == prefix or string.find(sec, "^" .. prefix) then
+        if sec == prefix then
             return config.delay, "bolt"
+        elseif string.find(sec, "^" .. prefix) then
+            local len = string.len(prefix)
+            if len > best_len then
+                best_len = len
+                best_config = config
+                best_type = "bolt"
+            end
         end
     end
     
-    -- Check pump-action shotguns
+    -- Check pump-action shotguns (may find longer match)
     for prefix, config in pairs(pump_action_shotguns) do
-        if sec == prefix or string.find(sec, "^" .. prefix) then
+        if sec == prefix then
             return config.delay, "pump"
+        elseif string.find(sec, "^" .. prefix) then
+            local len = string.len(prefix)
+            if len > best_len then
+                best_len = len
+                best_config = config
+                best_type = "pump"
+            end
         end
+    end
+    
+    if best_config then
+        return best_config.delay, best_type
     end
     
     return nil, nil
