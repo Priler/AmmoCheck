@@ -178,7 +178,7 @@ ignore_fake_animations = {
     ["wpn_vintorez_nimble"] = true, -- drops magazine (non-immersive)
 
     -- Vanilla anomaly guns
-    ["wpn_usp_nimble"] = true, -- drops magazine (non-immersive)
+    -- ["wpn_usp_nimble"] = true, -- drops magazine (non-immersive)
 }
 
 
