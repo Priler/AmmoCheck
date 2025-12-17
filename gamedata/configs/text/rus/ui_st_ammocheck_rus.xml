@@ -1,0 +1,290 @@
+<?xml version="1.0" encoding="windows-1251"?>
+<string_table>
+    <!-- Ammo_Check Messages -->
+    <string id="st_ac_overfull">
+        <text>Полный</text>
+    </string>
+    <string id="st_ac_plus1">
+        <text>Полный + 1</text>
+    </string>
+    <string id="st_ac_oitc">
+        <text>1 в патроннике</text>
+    </string>
+    <string id="st_ac_empty_mag_oitc">
+        <text>Пустой магазин + 1 патрон в патроннике</text>
+    </string>
+    <string id="st_ac_no_mag_oitc">
+        <text>Нет магазина + 1 патрон в патроннике</text>
+    </string>
+    <string id="st_ac_just_one">
+        <text>Только один</text>
+    </string>
+    <string id="st_ac_full">
+        <text>Полный</text>
+    </string>
+    <string id="st_ac_nearly_full">
+        <text>Почти полный</text>
+    </string>
+    <string id="st_ac_more_half">
+        <text>Больше половины</text>
+    </string>
+    <string id="st_ac_about_half">
+        <text>Около половины</text>
+    </string>
+    <string id="st_ac_less_half">
+        <text>Меньше половины</text>
+    </string>
+    <string id="st_ac_near_empty">
+        <text>Почти пустой</text>
+    </string>
+    <string id="st_ac_empty">
+        <text>Пустой</text>
+    </string>
+    <string id="st_ac_jammed">
+        <text>Заклинившее оружие</text>
+    </string>
+    <string id="st_ac_noMag">
+        <text>Нет магазина</text>
+    </string>
+    <string id="st_ac_grenade">
+        <text>Граната заряжена</text>
+    </string>
+    <string id="st_ac_loaded">
+        <text>Заряжено</text>
+    </string>
+    <string id="st_ac_noAmmo">
+        <text>Для этого не нужны патроны!</text>
+    </string>
+    <string id="st_ac_ammoLeft">
+        <text>левый</text>
+    </string>
+    <string id="st_ac_magsredux_update">
+        <text>Вы используете старую версию MagsRedux. Для наилучшего результата обновите её до версии с GitHub.</text>
+    </string>
+
+    <!-- MCM Menu Header -->
+    <string id="ui_mcm_menu_rax_ammo_check">
+        <text>Проверка боеприпасов</text>
+    </string>
+    <string id="ui_mm_title_rax_ammo_check">
+        <text>Проверка боеприпасов</text>
+    </string>
+
+    <!-- Section Titles -->
+    <string id="ui_mcm_rax_ammo_check_title_display">
+        <text>Настройки дисплея</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_title_hud">
+        <text>Настройки HUD</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_title_behavior">
+        <text>Настройки поведения</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_title_anim">
+        <text>Настройки анимации</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_title_keys">
+        <text>Настройки привязки клавиш</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_title_debug">
+        <text>Настройки отладки</text>
+    </string>
+
+    <!-- Display Settings -->
+    <string id="ui_mcm_rax_ammo_check_usecolor">
+        <text>Цветные сообщения</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_usecolor_desc">
+        <text>Включите цветовую кодировку сообщений в зависимости от уровня боеприпасов (красный = мало, белый = много).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_color_intensity">
+        <text>Интенсивность цвета</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_color_intensity_desc">
+        <text>Отрегулируйте яркость цветных сообщений. Более низкие значения приводят к более тусклым цветам.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_mode">
+        <text>Режим отображения</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_mode_desc">
+        <text>Выберите способ отображения количества боеприпасов: текстовое описание, числовое значение или оба варианта.</text>
+    </string>
+    <!-- Display Mode List Options (no ui_mcm_ prefix for list values) -->
+    <string id="rax_ammo_check_display_mode_lst_dm_text">
+        <text>Только текст</text>
+    </string>
+    <string id="rax_ammo_check_display_mode_lst_dm_numeric">
+        <text>Только числовые значения</text>
+    </string>
+    <string id="rax_ammo_check_display_mode_lst_dm_both">
+        <text>Текст + числа</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_show_ammo_type">
+        <text>Показать тип боеприпасов</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_show_ammo_type_desc">
+        <text>В сообщении следует указать название типа боеприпасов (например, "9x19 BP", "5.45x39 PS").</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_show_ammo_tag">
+        <text>Показать метку боеприпасов</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_show_ammo_tag_desc">
+        <text>Добавьте к сообщению тег классификации боеприпасов (например, (AP), (HP), (FMJ), (SL), (BK)).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_highlight_ammo_mode">
+        <text>Типы боеприпасов: подробный обзор</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_highlight_ammo_mode_desc">
+        <text>Раскрасьте сообщение в соответствии с типом боеприпасов. Нет: используйте цвет уровня боеприпасов. Всё сообщение: раскрасьте всю строку в соответствии с типом боеприпасов. Отдельные строки: отобразите метку боеприпасов на второй строке с соответствующим цветом.</text>
+    </string>
+    <!-- Highlight Ammo Mode List Options (no ui_mcm_ prefix for list values) -->
+    <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_none">
+        <text>Нет</text>
+    </string>
+    <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_whole">
+        <text>Все сообщения</text>
+    </string>
+    <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_separate">
+        <text>Отдельные линии</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_msg_duration">
+        <text>Продолжительность сообщения</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_msg_duration_desc">
+        <text>Как долго остается сообщение на экране о состоянии боеприпасов (в секундах).</text>
+    </string>
+
+    <!-- HUD Settings -->
+    <string id="ui_mcm_rax_ammo_check_hidecounter">
+        <text>Скрыть счетчик боеприпасов</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hidecounter_desc">
+        <text>Скройте стандартный счетчик боеприпасов HUD для более полного погружения в игровой процесс.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hideicon">
+        <text>Скрыть значок боеприпасов</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hideicon_desc">
+        <text>Скрыть значок типа боеприпасов из интерфейса.</text>
+    </string>
+
+    <!-- Behavior Settings -->
+    <string id="ui_mcm_rax_ammo_check_check_grenade_mode">
+        <text>Проверка в режиме гранатомета.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_check_grenade_mode_desc">
+        <text>Разрешить проверку боеприпасов, когда оружие находится в режиме гранатомета.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_auto_check_reload">
+        <text>Автоматическая проверка после перезагрузки</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_auto_check_reload_desc">
+        <text>Автоматическое отображение состояния боеприпасов после завершения перезарядки.</text>
+    </string>
+
+    <!-- Animation Settings -->
+    <string id="ui_mcm_rax_ammo_check_enable_animations">
+        <text>Включить анимацию</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_enable_animations_desc">
+        <text>Главный переключатель для всех анимаций. В положении ВЫКЛ. будет отображаться только текстовое сообщение (анимация оружия не будет отображаться).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_anim_mode">
+        <text>Альтернативная анимация осмотра магазина</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_anim_mode_desc">
+        <text>Анимация для оружия БЕЗ корректной анимации осмотра магазина. По умолчанию: скрыть/показать оружие. Опустить оружие: кратковременно опустить оружие. Имитация перезарядки: воспроизвести анимацию перезарядки для оружия с магазином, специальные анимации для оружия с внутренним магазином.</text>
+    </string>
+    <!-- Animation Mode List Options -->
+    <string id="rax_ammo_check_anim_mode_lst_anim_mode_default">
+        <text>По умолчанию (Скрыть/Показать)</text>
+    </string>
+    <string id="rax_ammo_check_anim_mode_lst_anim_mode_lower">
+        <text>Нижнее положение оружия</text>
+    </string>
+    <string id="rax_ammo_check_anim_mode_lst_anim_mode_fake_reload">
+        <text>Ложная перезарядка</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_no_magazine_fallback">
+        <text>Нет запасного магазина</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_no_magazine_fallback_desc">
+        <text>Анимация при использовании режима «ложная перезарядка», когда магазин не загружен (только для оружия со съемными магазинами MagsRedux). Скрыть/Показать: сменить оружие. Опустить: опустить оружие. Нет: просто показать сообщение.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_fallback">
+        <text>Внутренний запасной магазин</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_fallback_desc">
+        <text>Анимация перезарядки для оружия с внутренним магазином (дробовиков, револьверов и т. д.), не включенного в специальные списки, при использовании режима «Ложная перезарядка».</text>
+    </string>
+    <string id="rax_ammo_check_no_magazine_fallback_lst_fallback_hide_show">
+        <text>Скрыть/Показать оружие</text>
+    </string>
+    <string id="rax_ammo_check_no_magazine_fallback_lst_fallback_lower">
+        <text>Нижнее положение оружия</text>
+    </string>
+    <string id="rax_ammo_check_no_magazine_fallback_lst_fallback_none">
+        <text>Нет (только сообщение)</text>
+    </string>
+    <string id="rax_ammo_check_fake_reload_fallback_lst_fallback_hide_show">
+        <text>Скрыть/Показать оружие</text>
+    </string>
+    <string id="rax_ammo_check_fake_reload_fallback_lst_fallback_lower">
+        <text>Нижнее положение оружия</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_cycle">
+        <text>Продольно-скользящий: Циклический затвор</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_cycle_desc">
+        <text>Для винтовок с продольно-скользящим затвором (Kar98, Springfield и т. д.) вместо резервного режима воспроизводите анимацию открытия/закрытия затвора.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_eject">
+        <text>Затворная винтовка: выброс патрона</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_eject_desc">
+        <text>Как и в реальной жизни. При перезарядке затвора из магазина выбрасывается один патрон (добавляется в инвентарь). Требуется включить функцию «Перезарядка затвора». Поддерживаются не все винтовки с продольно-скользящим затвором.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_pump_rack">
+        <text>Помповые действия: направляющая для рейки</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_pump_rack_desc">
+        <text>Для помповых дробовиков (KS23, Remington 870 и т. д.) вместо резервного варианта используйте анимацию открытия/закрытия помпы.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_pump_eject">
+        <text>Помповый механизм: выброс гильзы</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_pump_eject_desc">
+        <text>Как и в реальной жизни. При взведении затвора из магазина выбрасывается один патрон (добавляется в инвентарь). Требуется включить функцию "Взведение затвора". Поддерживаются не все помповые дробовики.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_ignore_list">
+        <text>Ложная перезарядка. Игнорирование некоторых видов оружия.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fake_reload_ignore_list_desc">
+        <text>Используйте черный список, чтобы пропускать фиктивные анимации перезарядки для оружия с нереалистичными или некорректными анимациями. Для затронутого оружия будет использоваться резервная анимация. Отредактируйте файл ammo_check_weapons.script, чтобы настроить список.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_busy_hands_delay">
+        <text>Задержка сообщения</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_busy_hands_delay_desc">
+        <text>Задержка перед отображением сообщения (в секундах).</text>
+    </string>
+
+    <!-- Keybind Settings -->
+    <string id="ui_mcm_rax_ammo_check_keybind">
+        <text>Ключ проверки боеприпасов</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_keybind_desc">
+        <text>Клавиша для проверки боеприпасов. Может использоваться в сочетании с клавишами-модификаторами.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_update_mcm">
+        <text>Обновите MCM, чтобы изменить здесь привязку клавиш. По умолчанию клавиша — T.</text>
+    </string>
+
+    <!-- Debug Settings -->
+    <string id="ui_mcm_rax_ammo_check_debug_mode">
+        <text>Режим отладки</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_debug_mode_desc">
+        <text>Включите режим отладки для тестирования анимации. При включении: клавиши Numpad 0-9 проверяют состояния оружия, клавиша Numpad * отображает анимацию оружия. Используйте этот режим, чтобы определить, какое состояние запускает перезарядку затвора.</text>
+    </string>
+</string_table>

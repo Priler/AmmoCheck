@@ -4,7 +4,11 @@
 -- HOW TO ADD WEAPONS:
 -- 1. Find the weapon section name in configs (e.g., "wpn_mp133")
 -- 2. Add it to the appropriate list below
--- 3. The lookup uses PREFIX matching, so "wpn_mp133" matches "wpn_mp133_camo" etc.
+-- 3. The lookup uses LONGEST PREFIX matching:
+--    - "wpn_mp133" matches "wpn_mp133", "wpn_mp133_camo", "wpn_mp133_tactical"
+--    - More specific entries override shorter ones:
+--      ["wpn_aps"] = { anim = "anm_bore" }      -- matches wpn_aps, wpn_aps_gold
+--      ["wpn_aps_bas"] = { anim = "anm_reload" } -- matches wpn_aps_bas (takes priority)
 --
 -- HOW TO CUSTOMIZE:
 -- - delay: Time in seconds between anm_open and anm_close
@@ -79,9 +83,9 @@ pump_action_shotguns = {
     ["wpn_fort500"] = { delay = 0.7 },
     -- ["wpn_wincheaster1300"] = { delay = 0.6 },
 
-    ["wpn_remington870"] = { anim = "anm_bore", sound = "snd_bore" }, -- bore animation fits better
-    ["wpn_ithacam37"] = { anim = "anm_bore", sound = "snd_bore" }, -- bore animation fits better
-    ["wpn_wincheaster1300"] = { anim = "anm_bore", sound = "snd_bore" }, -- bore animation fits better
+    ["wpn_remington870"] = { anim = "anm_bore", sound = "snd_bore", delay = 0.6 }, -- bore animation fits better
+    ["wpn_ithacam37"] = { anim = "anm_bore", sound = "snd_bore", delay = 0.6 }, -- bore animation fits better
+    ["wpn_wincheaster1300"] = { anim = "anm_bore", sound = "snd_bore", delay = 0.6 }, -- bore animation fits better
 
     -- ["wpn_mossberg"] = { delay = 0.5 },
     -- ["wpn_spas12"] = { delay = 0.5 },
@@ -172,7 +176,9 @@ ignore_fake_animations = {
     ["wpn_cz75"] = true, -- drops magazine (non-immersive)
     ["wpn_m16"] = true, -- drops magazine (non-immersive)
     ["wpn_vintorez_nimble"] = true, -- drops magazine (non-immersive)
-    -- ["wpn_with_bad_anim"] = true,
+
+    -- Vanilla anomaly guns
+    ["wpn_usp_nimble"] = true, -- drops magazine (non-immersive)
 }
 
 
