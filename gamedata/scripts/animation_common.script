@@ -1,6 +1,6 @@
 --[[
-    Animation Common - Shared animation utilities and mutator system
-    
+    Shared animation utilities and mutator system
+
     This script provides a centralized system for:
     - Animation mutators (ordered list of functions that can modify animations)
     - Custom animation sounds with configurable volume
@@ -18,10 +18,8 @@
 
 
 
--- ============================================
 -- Animation Flags System
 -- Track animation states across scripts
--- ============================================
 
 FLAGS = {}
 local active_flags = {}
@@ -47,10 +45,9 @@ function clear_all_flags()
     active_flags = {}
 end
 
--- ============================================
+
 -- Animation Mutator System
 -- Ordered list of functions that can modify animation tables
--- ============================================
 
 local anim_mutators = {}
 
@@ -151,9 +148,8 @@ function get_mutator_list()
     return list
 end
 
--- ============================================
+
 -- Animation Utilities
--- ============================================
 
 --[[
     Check if a weapon section has a specific HUD animation.
@@ -184,10 +180,9 @@ function mutate_anim(anm_table, anm_suffix, section)
     return false
 end
 
--- ============================================
+
 -- Sound System
 -- Custom animation sounds with volume support
--- ============================================
 
 local sound_object_by_sec_by_path = {}
 local default_sound_volume = 1.0
@@ -316,9 +311,8 @@ local function parse_sound_config(snd_value)
     return path, volume, never_cancel
 end
 
--- ============================================
+
 -- Main Animation Callback
--- ============================================
 
 function actor_on_hud_animation_play(anm_table, item)
     if not item then return end
@@ -393,9 +387,8 @@ function actor_on_hud_animation_play(anm_table, item)
     end
 end
 
--- ============================================
+
 -- Initialization
--- ============================================
 
 function on_game_start()
     RegisterScriptCallback("actor_on_hud_animation_play", actor_on_hud_animation_play)

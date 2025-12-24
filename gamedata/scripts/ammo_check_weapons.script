@@ -15,7 +15,7 @@
 -- - anim: Animation name to play
 -- - sound: Sound parameter from weapon config
 --
--- DEBUG MODE KEYS:
+-- DEBUG MODE KEYS (works only when debug mode is enabled in MCM):
 -- Numpad +/- = Adjust bolt/pump animation delay in real-time
 -- Numpad /   = Play anm_bore animation
 -- Numpad .   = Play anm_idle animation
@@ -28,11 +28,9 @@ local string_find = string.find
 config_cache = {}
 
 
--- ============================================
--- Break-action shotguns
+--[ Break-action shotguns ]--
 -- These use a custom animation (usually anm_bore or anm_idle)
 -- Format: [prefix] = { anim = "animation_name", sound = "sound_param" }
--- ============================================
 break_action_shotguns = {
     ["wpn_toz34"] = { anim = "anm_bore", sound = "snd_bore" }, -- badass Chimera Hunter ammo check animation
 
@@ -40,11 +38,9 @@ break_action_shotguns = {
 }
 
 
--- ============================================
--- Bolt-action rifles
+--[ Bolt-action rifles ]--
 -- These play anm_open -> delay -> anm_close (bolt cycle)
 -- Format: [prefix] = { delay = seconds_between_open_and_close }
--- ============================================
 bolt_action_rifles = {
     ["wpn_k98"] = { delay = 1.3 },
     ["wpn_shiv"] = { delay = 1.2 },
@@ -67,11 +63,9 @@ bolt_action_rifles = {
 }
 
 
--- ============================================
--- Pump-action shotguns  
+--[ Pump-action shotguns ]--
 -- These play anm_open -> delay -> anm_close (pump rack)
 -- Format: [prefix] = { delay = seconds_between_open_and_close }
--- ============================================
 pump_action_shotguns = {
     ["wpn_ks23"] = { delay = 0.6 },
     ["wpn_mp155"] = { delay = 0.8 },
@@ -96,13 +90,11 @@ pump_action_shotguns = {
 }
 
 
--- ============================================
--- Pistols and SMGs
+--[ Pistols and SMGs ]--
 -- Custom animation overrides for pistols and submachine guns.
 -- Use this when fake reload animation doesn't look good.
 -- Format: [prefix] = { delay = seconds } (for open/close cycle)
 --     OR: [prefix] = { anim = "animation_name", sound = "sound_param" } (for custom anim)
--- ============================================
 pistol_smg_animations = {
     ["wpn_aps_bas"] = { anim = "anm_reload", sound = "snd_reload" },
     ["wpn_aps"] = { anim = "anm_bore", sound = "snd_bore" }, -- this one has proper mag inspect animation (anm_bore)
@@ -119,13 +111,11 @@ pistol_smg_animations = {
 }
 
 
--- ============================================
--- Assault Rifles
+--[ Assault Rifles ]--
 -- Custom animation overrides for assault rifles.
 -- Use this when fake reload animation doesn't look good.
 -- Format: [prefix] = { delay = seconds } (for open/close cycle)
 --     OR: [prefix] = { anim = "animation_name", sound = "sound_param" } (for custom anim)
--- ============================================
 rifle_animations = {
     ["wpn_dtmdr"] = { anim = "anm_reload", sound = "snd_reload" },
     ["wpn_val_tac"] = { anim = "anm_reload", sound = "snd_reload" },
@@ -136,13 +126,11 @@ rifle_animations = {
 }
 
 
--- ============================================
--- Sniper Rifles (non bolt-action)
+--[ Sniper Rifles (non bolt-action) ]--
 -- Custom animation overrides for semi-auto sniper rifles.
 -- Use this when fake reload animation doesn't look good.
 -- Format: [prefix] = { delay = seconds } (for open/close cycle)
 --     OR: [prefix] = { anim = "animation_name", sound = "sound_param" } (for custom anim)
--- ============================================
 sniper_animations = {
     ["wpn_m98b"] = { anim = "anm_reload", sound = "snd_reload" },
     ["wpn_svu"] = { anim = "anm_reload", sound = "snd_reload" },
@@ -155,14 +143,12 @@ sniper_animations = {
 }
 
 
--- ============================================
--- Ignore fake animations list
+--[ Ignore fake animations list ]--
 -- Weapons in this list will never use fake reload animations,
 -- regardless of the "Fake Reload" animation mode setting.
 -- They will fall back to the selected fallback behavior.
 -- Format: [prefix] = true
 -- * bruh probably should named it "ignore_fake_reload" .. but I'm too lazy boboo :3
--- ============================================
 ignore_fake_animations = {
     ["wpn_g36ka4_rwap"] = true, -- Mag Palming (non-immersive)
     ["wpn_g36c_rwap"] = true, -- Mag Palming (non-immersive)
@@ -184,14 +170,12 @@ ignore_fake_animations = {
 }
 
 
--- ============================================
--- Eject shell exclude list
+--[ Eject shell exclude list ]--
 -- Pump-action shotguns in this list will NOT eject a shell
 -- when checking ammo, even if "Eject Shell" option is enabled.
 -- Useful for shotguns where ejecting doesn't make sense
--- (e.g., tube-fed shotguns with no shell stop).
+-- (e.g., wrong animation, etc).
 -- Format: [prefix] = true
--- ============================================
 eject_shell_exclude = {
     ["wpn_ks23"] = true, -- doesn't use rack slide animation
     ["wpn_mp155"] = true, -- doesn't use rack slide animation
@@ -205,16 +189,13 @@ eject_shell_exclude = {
 }
 
 
--- ============================================
--- Cache for lookup results (cleared on reload)
--- ============================================
-config_cache = {}
 
--- ============================================
--- Lookup Functions (called from main script)
+--[  Lookup Functions (called from main script) ]--
 -- Each function has inlined lookup logic to avoid reference issues
 -- Uses longest-prefix matching to handle cases like wpn_aps vs wpn_aps_bas
--- ============================================
+
+-- Cache for lookup results (cleared on reload)
+config_cache = {}
 
 -- Helper: Find best (longest) matching prefix in a table
 local function find_best_match(sec, weapon_table)
@@ -416,9 +397,9 @@ function should_exclude_shell_eject(sec)
     return false
 end
 
--- ============================================
--- Utility functions
--- ============================================
+
+
+--[ Utility functions --]
 
 -- Clear cache (called on reload)
 function clear_config_cache()

@@ -4,7 +4,7 @@
 -- Last modified: 2022.08.17
 -- 
 -- Enhanced by: Abraham (Priler)
--- Enhanced from: 2025.12.10
+-- Enhanced on: 2025.12.10
 -- Repository: https://github.com/Priler/AmmoCheck
 -- 
 -- Changes:
@@ -97,7 +97,7 @@ local RESTORE_DET_DELAY = 0.1           -- Delay before checking to restore dete
 -- Cached objects (GC optimization) --
 local ZERO_VECTOR = vector():set(0, 0, 0)  -- Reusable zero vector for sound positioning
 
--- Debug mode numpad key mappings (defined once, not per keypress) --
+-- Debug mode numpad key mappings --
 local numpad_states = {
     [DIK_keys.DIK_NUMPAD0] = 0,
     [DIK_keys.DIK_NUMPAD1] = 1,
@@ -352,7 +352,7 @@ function on_key_press(key)
         weapon_hidden = false
     end
 
-    -- Debug mode: Numpad keys 0-9 test weapon states
+    -- Debug mode: Numpad keys 0-9 to test weapon states
     if debug_mode then
         if numpad_states[key] then
             debug_test_state(numpad_states[key])
@@ -711,7 +711,7 @@ local function format_ammo_message(text_msg, current, max, display_round, tag_ro
 end
 
 -- Shared ammo status calculation --
--- Returns: message, color, ammo_type, separate_tag
+-- returns: message, color, ammo_type, separate_tag
 local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
     local message = ""
     local clr = nil
@@ -915,9 +915,8 @@ function actor_on_weapon_jammed(weapon)
     print_dbg("Weapon jammed")
 end
 
--- ============================================
+
 -- Animation Mutator for Fake Reload Mode
--- ============================================
 
 -- Check if weapon has a specific HUD animation --
 local function has_animation(section, anm)
@@ -1002,16 +1001,15 @@ function on_game_start()
     end
 end
 
--- ============================================
+
 -- Animation Debug System
--- When Debug Mode is ON:
+-- When Debug Mode is ON in MCM:
 --   Numpad 0-9 = Test weapon state 0-9
 --   Numpad * = List all animations for current weapon
 --   Numpad + = Increase bolt/pump animation delay (+0.1s)
 --   Numpad - = Decrease bolt/pump animation delay (-0.1s)
 --   Numpad / = Play anm_bore animation
 --   Numpad . = Play anm_idle animation
--- ============================================
 
 -- Debug: Test different weapon states
 function debug_test_state(state_num)
@@ -1142,7 +1140,7 @@ function debug_play_animation(anim_name)
     printf("[AmmoCheck DEBUG] %s", msg)
 end
 
--- MCM Configuration --
+--[ MCM Configuration ]--
 function on_mcm_load()
     return {
         id = "rax_ammo_check",
@@ -1251,6 +1249,7 @@ function on_option_change()
     if ui_mcm then
         -- Display settings
         local clr_val = ui_mcm.get("rax_ammo_check/usecolor")
+
         -- MCM might return true/false, 1/0, or nil
         use_clr = (clr_val == true or clr_val == 1)
         color_intensity = ui_mcm.get("rax_ammo_check/color_intensity") or 100
@@ -1385,10 +1384,9 @@ local function restore_detector_after_anim(weapon)
     return true
 end
 
--- ============================================
+
 -- Fake Reload Animation System
 -- Plays reload animation without actually reloading
--- ============================================
 
 -- Restore ammo after fake reload animation completes --
 local function restore_ammo_after_reload(weapon, count, pre_table)
@@ -1646,9 +1644,8 @@ function check_ammo_after_reload()
     return true
 end
 
--- ============================================
+
 -- Weapon Configuration - External File
--- ============================================
 -- Weapon exclusion lists are defined in ammo_check_weapons.script
 -- This allows easy customization without modifying the main script.
 
@@ -1755,10 +1752,9 @@ function check_Ammo(skip_animation)
     do_ammo_check_anim = nil
     wpn_checking = nil
     
-    -- ============================================
+
     -- ANIMATION LOGIC
-    -- ============================================
-    
+
     -- Check if weapon has PROPER custom mag inspect animation
     local has_proper_inspect = has_animation(sec, "anm_ammo_check") or 
                                has_animation(sec, "anm_ammo_check_empty") or
@@ -1777,20 +1773,18 @@ function check_Ammo(skip_animation)
         return
     end
     
-    -- ============================================
+
     -- A) Weapon HAS proper mag inspect animation
     --    Let the native animation play, just show the message
-    -- ============================================
     if has_proper_inspect then
         print_dbg("Ammo check for %s - has proper inspect animation, NOT interfering.", sec)
         CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
         return
     end
     
-    -- ============================================
+
     -- B) Weapon DOES NOT have proper mag inspect animation
     --    Apply our alternative animation setting
-    -- ============================================
     
     -- B.1) Default mode: hide/show weapon
     if anim_mode == 0 then
@@ -1919,11 +1913,10 @@ function check_Ammo(skip_animation)
             print_dbg("Ammo check for %s - internal magazine weapon (MagsRedux), checking exclusion lists.", sec)
         end
         
-        -- ============================================
+
         -- Weapon does NOT use detachable magazines (internal magazine)
         -- Check exclusion lists for special handling
-        -- ============================================
-        
+
         -- Check 1: Break-action shotgun (TOZ-34 style)
         local break_config = get_break_action_config(sec)
         if break_config and has_animation(sec, break_config.anim) then
@@ -2207,10 +2200,9 @@ function check_Ammo(skip_animation)
             end
         end
         
-        -- ============================================
+
         -- Fallback: Try anm_reload for weapons not in custom lists
         -- This handles vanilla weapons without MagsRedux support
-        -- ============================================
         if has_animation(sec, "anm_reload") then
             print_dbg("Ammo check for %s - using anm_reload fallback (no MagsRedux/not in lists).", sec)
             
@@ -2250,9 +2242,8 @@ function check_Ammo(skip_animation)
             return
         end
         
-        -- ============================================
+
         -- Fallback: Use fake_reload_fallback setting
-        -- ============================================
         if fake_reload_fallback == 0 then
             -- Hide/show weapon
             print_dbg("Ammo check for %s - fallback to hide/show weapon.", sec)
