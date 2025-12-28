@@ -232,6 +232,21 @@
     <string id="rax_ammo_check_fake_reload_fallback_lst_fallback_lower">
         <text>Lower Weapon</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_empty_mag_fallback">
+        <text>Empty Magazine Fallback</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_empty_mag_fallback_desc">
+        <text>Animation to play when checking ammo with an empty magazine inserted. "Reload Animation" plays the full reload animation without actually loading ammo. "Animate" tries anm_bore/anm_idle. "Lower Weapon" just lowers the weapon briefly.</text>
+    </string>
+    <string id="rax_ammo_check_empty_mag_fallback_lst_empty_mag_reload_anim">
+        <text>Reload Animation</text>
+    </string>
+    <string id="rax_ammo_check_empty_mag_fallback_lst_empty_mag_animate">
+        <text>Animate (anm_bore/idle)</text>
+    </string>
+    <string id="rax_ammo_check_empty_mag_fallback_lst_empty_mag_lower">
+        <text>Lower Weapon</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_cycle">
         <text>Bolt-Action: Cycle Bolt</text>
     </string>

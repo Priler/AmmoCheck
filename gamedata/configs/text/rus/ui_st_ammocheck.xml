@@ -232,6 +232,21 @@
     <string id="rax_ammo_check_fake_reload_fallback_lst_fallback_lower">
         <text>Нижнее положение оружия</text>
     </string>
+        <string id="ui_mcm_rax_ammo_check_empty_mag_fallback">
+        <text>Откат пустого магазина</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_empty_mag_fallback_desc">
+        <text>Анимация при проверке боеприпасов с пустым магазином. «Анимация перезарядки» воспроизводит анимацию без загрузки патронов. «Анимация» использует anm_bore/anm_idle. «Нижнее положение» опускает оружие.</text>
+    </string>
+    <string id="rax_ammo_check_empty_mag_fallback_lst_empty_mag_reload_anim">
+        <text>Анимация перезарядки</text>
+    </string>
+    <string id="rax_ammo_check_empty_mag_fallback_lst_empty_mag_animate">
+        <text>Анимация (anm_bore/idle)</text>
+    </string>
+    <string id="rax_ammo_check_empty_mag_fallback_lst_empty_mag_lower">
+        <text>Нижнее положение оружия</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_cycle">
         <text>Продольно-скользящий: Циклический затвор</text>
     </string>
