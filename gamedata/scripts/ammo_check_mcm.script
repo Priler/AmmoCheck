@@ -89,6 +89,8 @@ local do_ammo_check_anim = nil  -- nil: not active, 1: started, 2: mutator appli
 local wpn_checking = nil        -- weapon being checked
 local det_active = nil          -- detector that was active before check
 local is_fake_reload = false    -- flag to prevent auto-check duplicate after fake reload
+local pending_restore_ammo = nil  -- ammo count to restore after fake reload
+local pending_restore_wpn_id = nil  -- weapon ID for pending restore
 
 -- animation timing constants
 local FAKE_RELOAD_MSG_DELAY = 1.5       -- delay before showing message after fake reload
@@ -1414,6 +1416,8 @@ local function restore_ammo_after_reload(weapon, count, pre_table, wpn_id)
         print_dbg("Fake reload timeout - cleaning up")
         restore_retry_count = 0
         do_ammo_check_anim = nil
+        pending_restore_ammo = nil
+        pending_restore_wpn_id = nil
         if det_active then
             db.actor:show_detector(true)
             det_active = nil
@@ -1432,6 +1436,8 @@ local function restore_ammo_after_reload(weapon, count, pre_table, wpn_id)
         print_dbg("Fake reload: weapon gone, cleaning up")
         restore_retry_count = 0
         do_ammo_check_anim = nil
+        pending_restore_ammo = nil
+        pending_restore_wpn_id = nil
         if det_active then
             db.actor:show_detector(true)
             det_active = nil
@@ -1471,6 +1477,8 @@ local function restore_ammo_after_reload(weapon, count, pre_table, wpn_id)
         -- clear flags
         restore_retry_count = 0
         do_ammo_check_anim = nil
+        pending_restore_ammo = nil
+        pending_restore_wpn_id = nil
         
         return true
     end
@@ -1675,15 +1683,21 @@ local function play_reload_animation(weapon)
             local oitc_ammo_type = weapon:get_ammo_type()
             print_dbg("One (%s: %s) in the chamber and no magazine loaded.", oitc_ammo_type, oitc_ammo_sec)
             weapon:set_ammo_elapsed(0)
+            pending_restore_ammo = 1
+            pending_restore_wpn_id = wpn_id
             weapon:switch_state(7)
             CreateTimeEvent("AmmoCheck_FakeReload", "dummy_reload"..wpn_id, 0.1, restore_ammo_after_reload, weapon, 1, pre_table, wpn_id)
         else
+            pending_restore_ammo = current_ammo
+            pending_restore_wpn_id = wpn_id
             weapon:switch_state(7)
             CreateTimeEvent("AmmoCheck_FakeReload", "dummy_reload"..wpn_id, 0.1, restore_ammo_after_reload, weapon, current_ammo, pre_table, wpn_id)
         end
     else
         -- vanilla path: use switch_state since we have ammo (current_ammo > 0 at this point)
         print_dbg("Fake reload for vanilla weapon, ammo count: %s", current_ammo)
+        pending_restore_ammo = current_ammo
+        pending_restore_wpn_id = wpn_id
         weapon:switch_state(7)
         CreateTimeEvent("AmmoCheck_FakeReload", "dummy_reload"..wpn_id, 0.1, restore_ammo_after_reload, weapon, current_ammo, nil, wpn_id)
     end
@@ -1835,6 +1849,15 @@ function check_Ammo(skip_animation)
     local currentState = weapon:get_state()
     local in_grenade_mode = weapon:weapon_in_grenade_mode()
     
+    -- if there's a pending ammo restore for this weapon, do it now
+    -- this prevents reading the inflated ammo count from switch_state(7)
+    if pending_restore_ammo and pending_restore_wpn_id == weaponId then
+        weapon:set_ammo_elapsed(pending_restore_ammo)
+        print_dbg("Restored pending ammo: %d", pending_restore_ammo)
+        pending_restore_ammo = nil
+        pending_restore_wpn_id = nil
+    end
+    
     -- if weapon is busy (animation playing), just show message without animation
     local weapon_busy = (currentState ~= 0)
     
@@ -1860,6 +1883,7 @@ function check_Ammo(skip_animation)
     RemoveTimeEvent("ammo_check", "restore_weapon")
     RemoveTimeEvent("ammo_check", "restore_det")
     RemoveTimeEvent("AmmoCheck_BoltCycle", "close"..weaponId)
+    RemoveTimeEvent("AmmoCheck_FakeReload", "dummy_reload"..weaponId)
     
     -- clear any lingering animation state
     do_ammo_check_anim = nil
