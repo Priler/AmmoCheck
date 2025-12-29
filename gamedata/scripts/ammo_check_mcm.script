@@ -89,8 +89,6 @@ local do_ammo_check_anim = nil  -- nil: not active, 1: started, 2: mutator appli
 local wpn_checking = nil        -- weapon being checked
 local det_active = nil          -- detector that was active before check
 local is_fake_reload = false    -- flag to prevent auto-check duplicate after fake reload
-local pending_restore_ammo = nil  -- ammo count to restore after fake reload
-local pending_restore_wpn_id = nil  -- weapon ID for pending restore
 
 -- animation timing constants
 local FAKE_RELOAD_MSG_DELAY = 1.5       -- delay before showing message after fake reload
@@ -1401,90 +1399,6 @@ end
 -- ### FAKE RELOAD ANIMATION SYSTEM
 -- plays reload animation without actually reloading
 
--- restore ammo after fake reload animation completes
-local restore_retry_count = 0
-local MAX_RESTORE_RETRIES = 50  -- ~5 seconds at 0.1s interval
-
-local function restore_ammo_after_reload(weapon, count, pre_table, wpn_id)
-    local weapon_id = wpn_id or (weapon and weapon:id())
-    
-    -- increment retry counter
-    restore_retry_count = restore_retry_count + 1
-    
-    -- safety: timeout after too many retries
-    if restore_retry_count > MAX_RESTORE_RETRIES then
-        print_dbg("Fake reload timeout - cleaning up")
-        restore_retry_count = 0
-        do_ammo_check_anim = nil
-        pending_restore_ammo = nil
-        pending_restore_wpn_id = nil
-        if det_active then
-            db.actor:show_detector(true)
-            det_active = nil
-        end
-        -- don't restore ammo on timeout - player may have reloaded manually
-        return true
-    end
-    
-    -- get weapon by ID if object is gone
-    if not weapon and weapon_id then
-        weapon = level.object_by_id(weapon_id)
-    end
-    
-    -- check if weapon object is still valid
-    if not weapon then 
-        print_dbg("Fake reload: weapon gone, cleaning up")
-        restore_retry_count = 0
-        do_ammo_check_anim = nil
-        pending_restore_ammo = nil
-        pending_restore_wpn_id = nil
-        if det_active then
-            db.actor:show_detector(true)
-            det_active = nil
-        end
-        return true 
-    end
-    
-    -- check weapon state - if idle or weapon was switched, restore ammo
-    local active_item = db.actor and db.actor:active_item()
-    local is_active = active_item and active_item:id() == weapon:id()
-    local is_idle = weapon:get_state() == 0
-    
-    -- restore if weapon is idle OR if weapon was switched (cancel scenario)
-    if is_idle or not is_active then
-        -- safety check: only restore if current ammo matches what we expect
-        -- prevents wiping ammo if player manually reloaded
-        local current_ammo = weapon:get_ammo_in_magazine()
-        if count == 0 and current_ammo ~= 1 then
-            -- we were restoring to 0 (empty mag trick) but ammo is no longer 1
-            -- player probably reloaded manually, don't wipe their ammo
-            print_dbg("Fake reload: ammo changed (%d -> %d), skipping restore", 1, current_ammo)
-        else
-            weapon:set_ammo_elapsed(count)
-            -- refund ammo if MagsRedux is installed and we have a valid pre_table
-            if pre_table and type(pre_table) == "table" and magazines and magazines.refund_ammo then
-                magazines.refund_ammo(pre_table, weapon)
-            end
-            print_dbg("Fake reload complete, ammo restored: %s (idle=%s, active=%s)", count, tostring(is_idle), tostring(is_active))
-        end
-        
-        -- restore detector
-        if det_active then
-            db.actor:show_detector(true)
-            det_active = nil
-        end
-        
-        -- clear flags
-        restore_retry_count = 0
-        do_ammo_check_anim = nil
-        pending_restore_ammo = nil
-        pending_restore_wpn_id = nil
-        
-        return true
-    end
-    return false
-end
-
 -- play HUD animation directly by name
 -- this bypasses the state machine and plays the animation directly
 local function play_hud_animation(weapon, anim_name, sound_param)
@@ -1604,34 +1518,27 @@ local function play_open_close_animation(weapon, delay_time)
 end
 
 -- play fake reload animation for weapons with detachable magazines
--- this is only called when we KNOW the weapon uses magazines
+-- uses play_hud_motion instead of switch_state(7) to avoid engine adding ammo
 local function play_reload_animation(weapon)
     local wpn_id = weapon:id()
     local sec = weapon:section()
     local current_ammo = weapon:get_ammo_in_magazine()
     
-    -- if magazine is empty, we CANNOT use switch_state(7) - it triggers real reload
-    -- but we CAN use play_hud_motion with state=7 to play animation with pending flag
-    -- unlike switch_state(7), play_hud_motion doesn't trigger the reload state machine
+    -- if magazine is empty, use fallback behavior
     if current_ammo == 0 then
         if empty_mag_fallback == 0 then
-            -- try reload animation (using play_hud_motion which doesn't trigger reload logic)
-            -- temporarily set ammo to 1 so animation_common doesn't switch to anm_reload_empty
+            -- try reload animation
             print_dbg("Fake reload for empty mag weapon %s, using reload animation", sec)
             if has_animation(sec, "anm_reload") then
                 weapon:set_ammo_elapsed(1)  -- trick animation selection
-                -- use state=7 to set pending flag (prevents movement interruption)
-                -- play_hud_motion doesn't call switch2_Reload so no actual reload happens
-                local success, err = pcall(function()
+                local success = pcall(function()
                     weapon:play_hud_motion("anm_reload", true, 7, 1, 0)
                 end)
-                weapon:set_ammo_elapsed(0)  -- restore immediately
+                weapon:set_ammo_elapsed(0)
                 
                 if success then
-                    -- play sound manually - store it so we can stop on cancel
                     local sound_file = ini_sys:r_string_ex(sec, "snd_reload")
                     if sound_file and sound_file ~= "$no_sound" then
-                        -- stop any previous sound
                         if empty_mag_sound and empty_mag_sound:playing() then
                             empty_mag_sound:stop()
                         end
@@ -1647,7 +1554,6 @@ local function play_reload_animation(weapon)
                 game.actor_lower_weapon(true)
             end
         elseif empty_mag_fallback == 1 then
-            -- use anm_bore/idle only
             print_dbg("Fake reload for empty mag weapon %s, using safe animation", sec)
             if has_animation(sec, "anm_bore") then
                 play_hud_animation(weapon, "anm_bore", "snd_bore")
@@ -1657,49 +1563,36 @@ local function play_reload_animation(weapon)
                 game.actor_lower_weapon(true)
             end
         else
-            -- just lower weapon
             print_dbg("Fake reload for empty mag weapon %s, lowering weapon", sec)
             game.actor_lower_weapon(true)
         end
         return
     end
     
-    -- MagsRedux path: handles magazines and chambered rounds properly
-    if magazines and is_supported_weapon(sec) then
-        local current_magazine = get_mag_loaded(wpn_id)
+    -- has ammo - use play_hud_motion to play reload animation without adding ammo
+    print_dbg("Fake reload for %s, ammo count: %s, using play_hud_motion", sec, current_ammo)
+    
+    if has_animation(sec, "anm_reload") then
+        local success = pcall(function()
+            weapon:play_hud_motion("anm_reload", true, 7, 1, 0)
+        end)
         
-        -- safely get ammo count table
-        local pre_table = nil
-        if magazines.count_ammo then
-            local result = magazines.count_ammo(weapon)
-            if type(result) == "table" then
-                pre_table = result
+        if success then
+            local sound_file = ini_sys:r_string_ex(sec, "snd_reload")
+            if sound_file and sound_file ~= "$no_sound" then
+                if empty_mag_sound and empty_mag_sound:playing() then
+                    empty_mag_sound:stop()
+                end
+                empty_mag_sound = sound_object(sound_file)
+                if empty_mag_sound then
+                    empty_mag_sound:play(db.actor, 0, sound_object.s2d)
+                end
             end
         end
-        
-        -- if one in the chamber, reloading will subtract a box of ammo and create a new dummy mag
-        if not current_magazine and magazines.retain_round and magazines.retain_round(weapon) and (current_ammo > 0) then
-            local oitc_ammo_sec = magazines.get_sec_chambered(weapon)
-            local oitc_ammo_type = weapon:get_ammo_type()
-            print_dbg("One (%s: %s) in the chamber and no magazine loaded.", oitc_ammo_type, oitc_ammo_sec)
-            weapon:set_ammo_elapsed(0)
-            pending_restore_ammo = 1
-            pending_restore_wpn_id = wpn_id
-            weapon:switch_state(7)
-            CreateTimeEvent("AmmoCheck_FakeReload", "dummy_reload"..wpn_id, 0.1, restore_ammo_after_reload, weapon, 1, pre_table, wpn_id)
-        else
-            pending_restore_ammo = current_ammo
-            pending_restore_wpn_id = wpn_id
-            weapon:switch_state(7)
-            CreateTimeEvent("AmmoCheck_FakeReload", "dummy_reload"..wpn_id, 0.1, restore_ammo_after_reload, weapon, current_ammo, pre_table, wpn_id)
-        end
+    elseif has_animation(sec, "anm_bore") then
+        play_hud_animation(weapon, "anm_bore", "snd_bore")
     else
-        -- vanilla path: use switch_state since we have ammo (current_ammo > 0 at this point)
-        print_dbg("Fake reload for vanilla weapon, ammo count: %s", current_ammo)
-        pending_restore_ammo = current_ammo
-        pending_restore_wpn_id = wpn_id
-        weapon:switch_state(7)
-        CreateTimeEvent("AmmoCheck_FakeReload", "dummy_reload"..wpn_id, 0.1, restore_ammo_after_reload, weapon, current_ammo, nil, wpn_id)
+        game.actor_lower_weapon(true)
     end
 end
 
@@ -1849,15 +1742,6 @@ function check_Ammo(skip_animation)
     local currentState = weapon:get_state()
     local in_grenade_mode = weapon:weapon_in_grenade_mode()
     
-    -- if there's a pending ammo restore for this weapon, do it now
-    -- this prevents reading the inflated ammo count from switch_state(7)
-    if pending_restore_ammo and pending_restore_wpn_id == weaponId then
-        weapon:set_ammo_elapsed(pending_restore_ammo)
-        print_dbg("Restored pending ammo: %d", pending_restore_ammo)
-        pending_restore_ammo = nil
-        pending_restore_wpn_id = nil
-    end
-    
     -- if weapon is busy (animation playing), just show message without animation
     local weapon_busy = (currentState ~= 0)
     
@@ -1883,7 +1767,6 @@ function check_Ammo(skip_animation)
     RemoveTimeEvent("ammo_check", "restore_weapon")
     RemoveTimeEvent("ammo_check", "restore_det")
     RemoveTimeEvent("AmmoCheck_BoltCycle", "close"..weaponId)
-    RemoveTimeEvent("AmmoCheck_FakeReload", "dummy_reload"..weaponId)
     
     -- clear any lingering animation state
     do_ammo_check_anim = nil
