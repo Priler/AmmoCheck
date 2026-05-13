@@ -58,6 +58,12 @@ local string_sub = string.sub
 local gc = game.translate_string
 
 -- settings (defaults)
+local show_message = true       -- show ammo message after check; false = animation only
+local hide_msg_on_inspect = false -- when true, suppress message only when a real anm_ammo_check is playing
+local ac_pending_inspect_anim_playing = false  -- state flag: true when path A lets the native inspect anim run; gates hide_msg_on_inspect. MUST be declared above display_ammo_status so its upvalue capture sees this local (Lua resolves names at function-definition time).
+local ac_inspect_pending = false  -- arms the mutator to override engine's anm_bore -> anm_ammo_check[_empty|_no_mag] in path A only. Distinct from do_ammo_check_anim so fake-reload paths (which use play_hud_motion) don't have their explicit anim_name rewritten by the mutator.
+local ac_cooldown_until = 0  -- time_global() value (ms) when the ammo-check-key cooldown expires. Set when a message is actually displayed; subsequent key presses while >0 and not yet elapsed are ignored. MUST be above check_Ammo so the closure captures it.
+local ac_last_weapon_id = 0  -- weapon id the displayed message is about. If the player switches weapons before the cooldown expires, the next key press resets the cooldown + hides the stale text and proceeds with the new weapon.
 local use_clr = true
 local hide_counter = true
 local hide_ammo_icon = true
@@ -70,7 +76,9 @@ local busy_hands_delay = 1
 local no_magazine_fallback = 1  -- 0: hide/show, 1: lower, 2: none (for Fake Reload mode when no mag loaded)
 local fake_reload_fallback = 1  -- 0: hide/show, 1: lower (for internal mag weapons)
 local empty_mag_fallback = 0    -- 0: reload anim (state=0), 1: anm_bore/idle, 2: lower weapon
-local fake_reload_bolt_cycle = true  -- enable bolt cycle for bolt-action rifles
+local fake_reload_bolt_cycle = true  -- enable bolt cycle for INTERNAL-mag bolt-action rifles
+local force_bolt_cycle_external_mag = false  -- when true, external-mag bolt-action variants play explicit bolt cycle instead of fake reload
+local treat_one_chamber_as_non_empty = false  -- when false (default) "1 in chamber, mag empty" plays anm_ammo_check_empty. Set true to revert to engine default (anm_ammo_check still plays because total ammo > 0).
 local fake_reload_bolt_eject = false -- eject one round when cycling bolt (realism)
 local fake_reload_pump_rack = true   -- enable pump rack for pump-action shotguns
 local fake_reload_pump_eject = false -- eject one round when racking slide (realism)
@@ -234,6 +242,11 @@ local function get_translation(key)
     return translated
 end
 
+-- Load-time marker. Always fires when the script is loaded by the engine; bypasses
+-- debug_mode entirely so we can tell from the log whether the runtime is using the
+-- latest version. Look for this line near script load in xray_<user>.log.
+printf("![AC] ammo_check_mcm.script loaded (build 2026-05-14 trace)")
+
 -- debug logging
 local dbg_log
 function print_dbg(msg, ...)
@@ -244,10 +257,13 @@ function print_dbg(msg, ...)
             return
         end
     end
-    
-    if not mcm_log then
-        printf("![AC] " .. msg, ...)
-    else
+
+    -- Always write to the engine log (xray_<username>.log) when this far. The mcm_log
+    -- path below routes to MCM Log's own destination, which may not be the engine log;
+    -- duplicating to printf guarantees the message lands somewhere the user can find.
+    printf("![AC] " .. msg, ...)
+
+    if mcm_log then
         if not dbg_log then
             dbg_log = mcm_log.new("![AC]")
             dbg_log.enabled = true
@@ -412,6 +428,7 @@ end
 -- message display
 local function display_message(message, clr)
     if not message then return false end
+    if not show_message then return false end
     actor_menu.set_msg(1, message, msg_duration, clr)
     return true
 end
@@ -849,13 +866,25 @@ end
 
 -- display ammo status with optional second line
 local function display_ammo_status(message, clr, ammo_type, separate_tag)
+    if not show_message then return end
+    -- hide_msg_on_inspect: suppress message only when path A is letting the native inspect anim play.
+    -- All other paths (fake reload, lower, hide/show, auto-check after reload) keep the flag false,
+    -- so they still show the message.
+    if hide_msg_on_inspect and ac_pending_inspect_anim_playing then return end
     display_message(message, clr)
-    
+
     -- display separate tag line if mode 2
     if highlight_ammo_mode == 2 and separate_tag then
         local tag_clr = use_clr and get_ammo_type_color(ammo_type) or clr06_White
         actor_menu.set_msg(2, separate_tag, msg_duration, tag_clr)
     end
+
+    -- Arm cooldown: further presses of the ammo check key are ignored until this message fades.
+    -- Track the weapon the message is about so a weapon switch can clear it early.
+    ac_cooldown_until = time_global() + math_floor(msg_duration * 1000)
+    local _a = db.actor
+    local _w = _a and _a:active_item()
+    ac_last_weapon_id = (_w and IsWeapon(_w)) and _w:id() or 0
 end
 
 -- auto-check after reload
@@ -894,24 +923,25 @@ function actor_on_hud_animation_end(item, section, motion, state, slot)
         return
     end
     
-    -- use case-insensitive pattern matching (avoids creating new string)
+    -- Anchor patterns to ^anm_ to avoid matching unrelated motion names
+    -- (e.g., anm_chamber_open, anm_grenade_close, anm_preload).
     -- check reload first (most common case)
-    if string_find(motion, "[Rr]eload") then
+    if string_find(motion, "^anm_[Rr]eload") then
         pending_reload_check = false
         print_dbg("Reload animation ended: %s", motion)
         CreateTimeEvent("ammo_check", "auto_check", AUTO_CHECK_DELAY, auto_check_after_reload_callback)
         return
     end
-    
-    -- check for shotgun open animation
-    if string_find(motion, "[Oo]pen") and string_find(motion, "anm") then
+
+    -- shotgun open: start tracking
+    if string_find(motion, "^anm_[Oo]pen") then
         pending_reload_check = true
         print_dbg("Shotgun reload started: %s", motion)
         return
     end
-    
-    -- check for shotgun close animation (only if we're tracking a reload)
-    if pending_reload_check and string_find(motion, "[Cc]lose") then
+
+    -- shotgun close: only if we're tracking a reload
+    if pending_reload_check and string_find(motion, "^anm_[Cc]lose") then
         pending_reload_check = false
         print_dbg("Shotgun reload ended: %s", motion)
         CreateTimeEvent("ammo_check", "auto_check", AUTO_CHECK_DELAY, auto_check_after_reload_callback)
@@ -944,32 +974,59 @@ local function mag_check_animation(anm_table, obj)
     end
     
     -- handle start of ammo check animation (state 4 = inspect/bore)
-    if do_ammo_check_anim == 1 and obj and obj:get_state() == 4 then
+    -- ONLY fires for path A (engine-driven inspect anim). For fake-reload paths the mod
+    -- has already chosen the anim explicitly via play_hud_motion - rewriting anm_name
+    -- here would hijack that choice (the original bug: anm_reload -> anm_ammo_check).
+    if ac_inspect_pending and obj and obj:get_state() == 4 then
         wpn_checking = obj
         local sec = obj:section()
-        
+
         local is_supported = is_supported_weapon(sec)
         local has_mag_data = get_mag_loaded(obj:id())
-        
-        -- try different ammo check animations
-        -- if none exist, DON'T change the animation - let the default anm_bore play
-        if animation_common and animation_common.has_animation then
-            if is_supported and not has_mag_data and animation_common.has_animation(sec, "anm_ammo_check_no_mag") then
-                anm_table.anm_name = "anm_ammo_check_no_mag"
-                print_dbg("Ammo check animation mutated to: %s", anm_table.anm_name)
-            elseif obj:get_ammo_in_magazine() == 0 and animation_common.has_animation(sec, "anm_ammo_check_empty") then
-                anm_table.anm_name = "anm_ammo_check_empty"
-                print_dbg("Ammo check animation mutated to: %s", anm_table.anm_name)
-            elseif animation_common.has_animation(sec, "anm_ammo_check") then
-                anm_table.anm_name = "anm_ammo_check"
-                print_dbg("Ammo check animation mutated to: %s", anm_table.anm_name)
-            else
-                -- no ammo_check animation - let the default inspect animation play
-                print_dbg("No ammo_check animation for %s, using default inspect: %s", sec, anm_table.anm_name)
+        local ammo_in_mag = obj:get_ammo_in_magazine()
+
+        -- "1 in chamber, magazine itself empty" -> treat as empty for variant selection.
+        -- Heuristic: ammo == 1 and the weapon's mag holds more than 1 (so single-shot
+        -- weapons don't get mislabelled when fully loaded with their single round).
+        -- The MCM option `treat_one_chamber_as_non_empty` opts OUT of this (default off).
+        local treat_as_empty = false
+        if (not treat_one_chamber_as_non_empty) and ammo_in_mag == 1 then
+            local mag_size = SYS_GetParam(2, sec, "ammo_mag_size", 0)
+            if mag_size and mag_size > 1 then
+                treat_as_empty = true
             end
         end
-        
-        do_ammo_check_anim = 2
+
+        -- try different ammo check animations
+        -- if none exist, DON'T change the animation - let the default anm_bore play
+        -- Decide which variant we'd want first; only write to anm_table if it'd actually change.
+        -- Writing back the same value can still cause the engine to retrigger camera effects
+        -- on some weapons (notably L96A1), so the no-op guard matters.
+        local target_anim = nil
+        if animation_common and animation_common.has_animation then
+            if is_supported and not has_mag_data and animation_common.has_animation(sec, "anm_ammo_check_no_mag") then
+                target_anim = "anm_ammo_check_no_mag"
+            elseif (ammo_in_mag == 0 or treat_as_empty) and animation_common.has_animation(sec, "anm_ammo_check_empty") then
+                target_anim = "anm_ammo_check_empty"
+            elseif animation_common.has_animation(sec, "anm_ammo_check") then
+                target_anim = "anm_ammo_check"
+            end
+        end
+
+        if target_anim then
+            if anm_table.anm_name ~= target_anim then
+                print_dbg("Ammo check animation mutated: %s -> %s (treat_as_empty=%s, ammo=%s)", tostring(anm_table.anm_name), target_anim, tostring(treat_as_empty), tostring(ammo_in_mag))
+                anm_table.anm_name = target_anim
+            else
+                print_dbg("Ammo check: engine already on %s, no mutation needed", target_anim)
+            end
+        else
+            -- no ammo_check animation - let the default inspect animation play
+            print_dbg("No ammo_check animation for %s, using default inspect: %s", sec, tostring(anm_table.anm_name))
+        end
+
+        do_ammo_check_anim = 2     -- enable the end-branch cleanup below
+        ac_inspect_pending = false -- one-shot
     end
 end
 
@@ -1157,6 +1214,8 @@ function on_mcm_load()
             -- display
             { id = "divider_display", type = "line" },
             { id = "title_display", type = "title", text = "ui_mcm_rax_ammo_check_title_display" },
+            { id = "show_message", type = "check", val = 1, def = true },
+            { id = "hide_msg_on_inspect", type = "check", val = 1, def = false },
             { id = "usecolor", type = "check", val = 1, def = true },
             { id = "color_intensity", type = "track", val = 2, min = 30, max = 100, step = 10, def = 70 },
             { id = "display_mode", type = "list", val = 2, def = 0, 
@@ -1220,7 +1279,9 @@ function on_mcm_load()
                     { 2, "empty_mag_lower" }
                 }
             },
+            { id = "treat_one_chamber_as_non_empty", type = "check", val = 1, def = false },
             { id = "fake_reload_bolt_cycle", type = "check", val = 1, def = true },
+            { id = "force_bolt_cycle_external_mag", type = "check", val = 1, def = false },
             { id = "fake_reload_bolt_eject", type = "check", val = 1, def = false },
             { id = "fake_reload_pump_rack", type = "check", val = 1, def = true },
             { id = "fake_reload_pump_eject", type = "check", val = 1, def = false },
@@ -1260,6 +1321,10 @@ function on_option_change()
     
     if ui_mcm then
         -- display settings
+        local show_msg_val = ui_mcm.get("rax_ammo_check/show_message")
+        show_message = (show_msg_val == true or show_msg_val == 1 or show_msg_val == nil)  -- default true
+        local hide_inspect_val = ui_mcm.get("rax_ammo_check/hide_msg_on_inspect")
+        hide_msg_on_inspect = (hide_inspect_val == true or hide_inspect_val == 1)  -- default false
         local clr_val = ui_mcm.get("rax_ammo_check/usecolor")
         -- MCM might return true/false, 1/0, or nil
         use_clr = (clr_val == true or clr_val == 1)
@@ -1292,8 +1357,12 @@ function on_option_change()
         no_magazine_fallback = ui_mcm.get("rax_ammo_check/no_magazine_fallback") or 1
         fake_reload_fallback = ui_mcm.get("rax_ammo_check/fake_reload_fallback") or 1
         empty_mag_fallback = ui_mcm.get("rax_ammo_check/empty_mag_fallback") or 0
+        local treat_chamber_val = ui_mcm.get("rax_ammo_check/treat_one_chamber_as_non_empty")
+        treat_one_chamber_as_non_empty = (treat_chamber_val == true or treat_chamber_val == 1)  -- default false (fix applied)
         local bolt_val = ui_mcm.get("rax_ammo_check/fake_reload_bolt_cycle")
         fake_reload_bolt_cycle = (bolt_val == true or bolt_val == 1 or bolt_val == nil)  -- default true
+        local force_ext_val = ui_mcm.get("rax_ammo_check/force_bolt_cycle_external_mag")
+        force_bolt_cycle_external_mag = (force_ext_val == true or force_ext_val == 1)  -- default false
         local bolt_eject_val = ui_mcm.get("rax_ammo_check/fake_reload_bolt_eject")
         fake_reload_bolt_eject = (bolt_eject_val == true or bolt_eject_val == 1)  -- default false
         local pump_val = ui_mcm.get("rax_ammo_check/fake_reload_pump_rack")
@@ -1340,6 +1409,10 @@ local ac_pending_clr = nil
 local ac_pending_ammo_type = nil
 local ac_pending_separate_tag = nil
 local ac_pending_slot = nil  -- for restore_weapon_callback
+-- NOTE: ac_pending_inspect_anim_playing is declared earlier in the file (near the settings block)
+-- because display_ammo_status reads it and is defined much earlier than this block. Lua's
+-- lexical scoping captures upvalues at function-definition time, so the declaration must be
+-- visible above display_ammo_status, not here.
 
 -- pre-defined callback for delayed display
 local function delayed_display_callback()
@@ -1651,7 +1724,7 @@ function check_ammo_after_reload()
     disable_info("sleep_active")
     
     -- display with "Loaded" prefix
-    if message then
+    if message and show_message then
         local loaded_msg = game.translate_string("st_ac_loaded") .. " " .. message
         if show_ammo_type and ammo_type then
             if separate_tag then
@@ -1661,6 +1734,9 @@ function check_ammo_after_reload()
             end
         end
         actor_menu.set_msg(1, loaded_msg, msg_duration, use_clr and clr or nil)
+        -- Arm cooldown so the ammo check key is ignored while this "Loaded" message shows.
+        ac_cooldown_until = time_global() + math_floor(msg_duration * 1000)
+        ac_last_weapon_id = weaponId
     end
     
     return true
@@ -1668,6 +1744,13 @@ end
 
 -- ### WEAPON CONFIGURATION
 -- weapon exclusion lists are defined in ammo_check_weapons.script
+
+local function get_ammo_check_override(sec)
+    if ammo_check_weapons and ammo_check_weapons.get_ammo_check_override then
+        return ammo_check_weapons.get_ammo_check_override(sec)
+    end
+    return nil
+end
 
 local function get_break_action_config(sec)
     if ammo_check_weapons and ammo_check_weapons.get_break_action_config then
@@ -1729,19 +1812,50 @@ end
 function check_Ammo(skip_animation)
     local actor = db.actor
     if not actor then return end
-    
+
     local weapon = actor:active_item()
-    
+
     -- validation checks with early returns
     if not weapon then return end
     if not IsWeapon(weapon) then return end
     if IsItem("fake_ammo_wpn", nil, weapon) then return end
 
+    -- Cooldown handling: while a previous ammo-check is in flight (animation playing or
+    -- message on screen), ignore new key presses for the SAME weapon. If the player switched
+    -- weapons, reset and continue.
+    -- The cooldown is set in two places:
+    --   1. Right here (immediately, 5s guard) the moment check_Ammo commits to running.
+    --      This blocks spam during the animation/delay window BEFORE the message displays.
+    --   2. Inside display_ammo_status / check_ammo_after_reload, refined to the precise
+    --      message-fade time (time_global() + msg_duration).
+    -- The "defer until weapon idle" recursion clears the cooldown before re-calling check_Ammo
+    -- so it isn't blocked by its own first arming.
+    if ac_cooldown_until > 0 and time_global() < ac_cooldown_until then
+        if weapon:id() == ac_last_weapon_id then
+            print_dbg("Ammo check key ignored - previous check still in flight (same weapon).")
+            return
+        end
+        -- Different weapon: clear the stale text immediately and reset cooldown, then fall
+        -- through to the normal check_Ammo flow.
+        print_dbg("Ammo check: weapon changed (was id=%s, now id=%s) - clearing stale message.", tostring(ac_last_weapon_id), tostring(weapon:id()))
+        ac_cooldown_until = 0
+        ac_last_weapon_id = 0
+        actor_menu.set_msg(1, "", 0)
+        actor_menu.set_msg(2, "", 0)
+    end
+
+    -- Arm initial 5-second guard cooldown so spamming the key during the animation/delay
+    -- window before the message displays doesn't trigger another check_Ammo. The precise
+    -- value will be overwritten by display_ammo_status when the message actually appears.
+    ac_cooldown_until = time_global() + 5000
+    ac_last_weapon_id = weapon:id()
+
     local weaponId = weapon:id()
     local sec = weapon:section()
     local currentState = weapon:get_state()
     local in_grenade_mode = weapon:weapon_in_grenade_mode()
-    
+    print_dbg("check_Ammo ENTER section=%s state=%s grenade_mode=%s", sec, tostring(currentState), tostring(in_grenade_mode))
+
     -- if weapon is busy (animation playing), just show message without animation
     local weapon_busy = (currentState ~= 0)
     
@@ -1766,22 +1880,80 @@ function check_Ammo(skip_animation)
     RemoveTimeEvent("ammo_check", "message_delay")
     RemoveTimeEvent("ammo_check", "restore_weapon")
     RemoveTimeEvent("ammo_check", "restore_det")
+    RemoveTimeEvent("ammo_check", "defer_to_idle")
     RemoveTimeEvent("AmmoCheck_BoltCycle", "close"..weaponId)
     
     -- clear any lingering animation state
     do_ammo_check_anim = nil
     wpn_checking = nil
+    is_fake_reload = false       -- in case the previous fake reload's anim-end callback never fired
+    pending_reload_check = false -- in case a previous shotgun open never got its matching close
+    ac_pending_inspect_anim_playing = false  -- only set true in path A success branch below
+    ac_inspect_pending = false   -- one-shot mutator-arm; cleared in case path A's state-4 callback never fired
     
     -- ### ANIMATION LOGIC
     
     -- check if weapon has PROPER custom mag inspect animation
-    local has_proper_inspect = has_animation(sec, "anm_ammo_check") or 
+    local has_proper_inspect = has_animation(sec, "anm_ammo_check") or
                                has_animation(sec, "anm_ammo_check_empty") or
                                has_animation(sec, "anm_ammo_check_no_mag")
-    
-    -- if weapon busy or skip requested: just show message
-    if skip_animation or weapon_busy then
+
+    -- bolt-action override: skip path A (native inspect anim) in two cases:
+    --   1. weapon flagged { override_inspect = true } for internal-mag entries, and the
+    --      fake_reload_bolt_cycle toggle is on -> we want bolt cycle instead of inspect.
+    --   2. weapon flagged { external_mag = true } - we always route external-mag bolt-actions
+    --      through fake reload (or forced bolt cycle), never the engine's inspect anim.
+    if has_proper_inspect then
+        local _bolt_cfg = get_bolt_action_config(sec)
+        if _bolt_cfg then
+            if _bolt_cfg.external_mag then
+                print_dbg("Ammo check for %s - external_mag bolt-action, skipping inspect anim.", sec)
+                has_proper_inspect = false
+            elseif _bolt_cfg.override_inspect and fake_reload_bolt_cycle then
+                print_dbg("Ammo check for %s - bolt-action override_inspect, ignoring inspect anim.", sec)
+                has_proper_inspect = false
+            end
+        end
+    end
+
+    -- if skip requested: just show message
+    if skip_animation then
         CreateTimeEvent("ammo_check", "message_delay", 0, delayed_display_callback)
+        return
+    end
+
+    -- if weapon is busy (drawing, reloading, firing, etc.): defer the check until
+    -- the weapon returns to idle so the animation can play properly. Without this
+    -- the previous behavior was to just print the message and skip the animation,
+    -- which the user found unintuitive when pressing the ammo check key during weapon
+    -- drawing. Bounded by a 5s timeout so a stuck state can't block forever.
+    if weapon_busy then
+        print_dbg("Ammo check for %s - weapon busy (state=%s), deferring until idle.", sec, tostring(currentState))
+        local _start_time = time_global()
+        CreateTimeEvent("ammo_check", "defer_to_idle", 0.1, function()
+            local _actor = db.actor
+            if not _actor then return true end
+            local _w = _actor:active_item()
+            if not _w or not IsWeapon(_w) then return true end
+
+            if time_global() - _start_time > 5000 then
+                print_dbg("Ammo check deferred: 5s timeout, abandoning.")
+                ac_cooldown_until = 0  -- release the guard so the user can press again
+                ac_last_weapon_id = 0
+                return true
+            end
+
+            if _w:get_state() ~= 0 then
+                return false  -- still busy, keep polling
+            end
+
+            print_dbg("Ammo check: weapon now idle, running deferred check.")
+            -- Clear the guard cooldown set by the first call so the recursion isn't blocked.
+            ac_cooldown_until = 0
+            ac_last_weapon_id = 0
+            check_Ammo()
+            return true
+        end)
         return
     end
     
@@ -1791,7 +1963,73 @@ function check_Ammo(skip_animation)
         CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
         return
     end
-    
+
+    -- [ Top-priority per-weapon override ]--
+    -- Bypasses all other animation logic when ammo_check_override has an entry for this weapon.
+    -- Force-mode (force_*) values are picked when MCM "Force Bolt Cycle for External-Mag Rifles"
+    -- is ON and the entry has at least one force_* field; otherwise default fields apply.
+    local override = get_ammo_check_override(sec)
+    if override then
+        local use_force_mode = force_bolt_cycle_external_mag and (
+            override.force_anim ~= nil or override.force_fake_reload or override.force_fallback
+        )
+
+        local m_fallback, m_fake_reload, m_anim, m_sound
+        if use_force_mode then
+            m_fallback     = override.force_fallback
+            m_fake_reload  = override.force_fake_reload
+            m_anim         = override.force_anim
+            m_sound        = override.force_sound
+        else
+            m_fallback     = override.fallback
+            m_fake_reload  = override.fake_reload
+            m_anim         = override.anim
+            m_sound        = override.sound
+        end
+
+        local mode_label = use_force_mode and " (force)" or ""
+
+        if m_fallback then
+            print_dbg("Ammo check for %s - override = fallback%s, using fake_reload_fallback=%s.", sec, mode_label, fake_reload_fallback)
+            if fake_reload_fallback == 0 then
+                ac_pending_slot = actor:active_slot()
+                actor:activate_slot(0)
+                weapon_hidden = true
+                CreateTimeEvent("ammo_check", "restore_weapon", 0, restore_weapon_callback)
+            else
+                game.actor_lower_weapon(true)
+                CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+            end
+            return
+        elseif m_fake_reload then
+            print_dbg("Ammo check for %s - override = fake_reload%s, using standard fake-reload path.", sec, mode_label)
+            do_ammo_check_anim = 1
+            is_fake_reload = true
+            det_active = actor:active_detector() or nil
+            if det_active then
+                det_active:switch_state(2)
+            end
+            play_reload_animation(weapon)
+            CreateTimeEvent("ammo_check", "message_delay", FAKE_RELOAD_MSG_DELAY, delayed_display_callback)
+            CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
+            return
+        elseif m_anim and has_animation(sec, m_anim) then
+            print_dbg("Ammo check for %s - override = anim %s%s.", sec, m_anim, mode_label)
+            do_ammo_check_anim = 1
+            is_fake_reload = true
+            det_active = actor:active_detector() or nil
+            if det_active then
+                det_active:switch_state(2)
+            end
+            play_hud_animation(weapon, m_anim, m_sound)
+            CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+            CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
+            return
+        end
+        -- override entry exists but the active mode has no usable fields -> fall through
+        print_dbg("Ammo check for %s - override entry has no usable %s fields, falling through to normal logic.", sec, use_force_mode and "force-mode" or "default-mode")
+    end
+
     -- [ A) weapon HAS proper mag inspect animation ]--
     if has_proper_inspect then
         -- check if we need to apply no_magazine_fallback
@@ -1848,6 +2086,11 @@ function check_Ammo(skip_animation)
         
         -- has proper inspect and magazine is loaded (or internal mag) - let native animation play
         print_dbg("Ammo check for %s - has proper inspect animation, NOT interfering.", sec)
+        ac_pending_inspect_anim_playing = true  -- gates hide_msg_on_inspect
+        -- Arm the mutator (path-A-only flag) so it can override the engine's anm_bore choice
+        -- with anm_ammo_check / _empty / _no_mag when state 4 fires. Using a dedicated flag
+        -- (not do_ammo_check_anim) ensures fake-reload paths don't trigger this mutation.
+        ac_inspect_pending = true
         CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
         return
     end
@@ -1902,9 +2145,45 @@ function check_Ammo(skip_animation)
                                        magazine_binder.weapon_default_magazine(weapon)
             
             if has_detachable_mag then
+                -- "Force Bolt Cycle for External-Mag Rifles" early route:
+                -- the default detachable-mag handling below uses fake reload (anm_reload),
+                -- which doesn't honor the force toggle. If the weapon is flagged in
+                -- bolt_action_rifles with external_mag = true AND the toggle is on, play
+                -- the explicit bolt cycle here instead.
+                if force_bolt_cycle_external_mag then
+                    local _bolt_cfg = get_bolt_action_config(sec)
+                    if _bolt_cfg and _bolt_cfg.external_mag then
+                        local use_custom_anim = _bolt_cfg.anim and has_animation(sec, _bolt_cfg.anim)
+                        local use_open_close = has_animation(sec, "anm_open") and has_animation(sec, "anm_close")
+                        local delay = _bolt_cfg.delay or 0.7
+
+                        if use_custom_anim or use_open_close then
+                            print_dbg("Ammo check for %s - external_mag + force_bolt_cycle, playing explicit bolt cycle.", sec)
+                            do_ammo_check_anim = 1
+                            is_fake_reload = true
+                            det_active = actor:active_detector() or nil
+                            if det_active then
+                                det_active:switch_state(2)
+                            end
+
+                            if use_custom_anim then
+                                play_hud_animation(weapon, _bolt_cfg.anim, _bolt_cfg.sound)
+                                CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+                                CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
+                            else
+                                play_open_close_animation(weapon, delay)
+                                CreateTimeEvent("ammo_check", "message_delay", delay + BOLT_PUMP_MSG_OFFSET, delayed_display_callback)
+                            end
+                            return
+                        else
+                            print_dbg("Ammo check for %s - external_mag + force_bolt_cycle but no usable cycle anim, falling through to fake reload.", sec)
+                        end
+                    end
+                end
+
                 -- DETACHABLE magazine weapon - check if magazine is actually loaded
                 local current_magazine = get_mag_loaded(weaponId)
-                
+
                 if current_magazine then
                     -- before using fake reload, check if weapon has custom animation override
                     local custom_config = get_pistol_smg_config(sec) or get_rifle_config(sec) or get_sniper_config(sec)
@@ -2013,139 +2292,186 @@ function check_Ammo(skip_animation)
             end
         end
         
-        -- check 2: bolt-action rifle (if MCM option enabled)
-        if fake_reload_bolt_cycle then
-            local bolt_config = get_bolt_action_config(sec)
-            if bolt_config then
-                local use_custom_anim = bolt_config.anim and has_animation(sec, bolt_config.anim)
-                local use_open_close = has_animation(sec, "anm_open") and has_animation(sec, "anm_close")
-                local delay = bolt_config.delay or 0.7  -- default delay if not specified
-                
-                -- priority 1: use custom animation if specified and exists
-                if use_custom_anim then
-                    print_dbg("Ammo check for %s - bolt-action, using custom %s animation.", sec, bolt_config.anim)
-                    
-                    do_ammo_check_anim = 1  -- mark that we're doing our own animation
-                    is_fake_reload = true   -- prevent auto-check duplicate
-                    
-                    det_active = actor:active_detector() or nil
-                    if det_active then
-                        det_active:switch_state(2)
-                    end
-                    
-                    -- eject one round if option enabled and there's ammo
-                    if fake_reload_bolt_eject and currentAmmo > 0 then
-                        local ammo_section = get_vanilla_ammo_section(weapon)
-                        if ammo_section then
-                            weapon:set_ammo_elapsed(currentAmmo - 1)
-                            alife_create_item(ammo_section, actor, { ammo = 1 })
-                            print_dbg("Ejected round: %s (remaining: %d)", ammo_section, currentAmmo - 1)
-                            ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag = 
-                                get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
-                        end
-                    end
-                    
-                    play_hud_animation(weapon, bolt_config.anim, bolt_config.sound)
-                    CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
-                    CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
-                    return
-                    
-                -- priority 2: use anm_open/anm_close (either as configured or as fallback)
-                elseif use_open_close then
-                    print_dbg("Ammo check for %s - bolt-action, using open/close with %.2fs delay.", sec, delay)
-                    
-                    do_ammo_check_anim = 1  -- mark that we're doing our own animation
-                    is_fake_reload = true   -- prevent auto-check duplicate
-                    
-                    det_active = actor:active_detector() or nil
-                    if det_active then
-                        det_active:switch_state(2)
-                    end
-                    
-                    -- eject one round if option enabled and there's ammo
-                    if fake_reload_bolt_eject and currentAmmo > 0 then
-                        local ammo_section = get_vanilla_ammo_section(weapon)
-                        if ammo_section then
-                            weapon:set_ammo_elapsed(currentAmmo - 1)
-                            alife_create_item(ammo_section, actor, { ammo = 1 })
-                            print_dbg("Ejected round: %s (remaining: %d)", ammo_section, currentAmmo - 1)
-                            ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag = 
-                                get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
-                        end
-                    end
-                    
-                    play_open_close_animation(weapon, delay)
-                    CreateTimeEvent("ammo_check", "message_delay", delay + BOLT_PUMP_MSG_OFFSET, delayed_display_callback)
-                    return
+        -- check 2: bolt-action rifle
+        -- Decision matrix:
+        --   internal-mag entry (no external_mag flag):
+        --     fake_reload_bolt_cycle ON  -> play explicit bolt cycle
+        --     fake_reload_bolt_cycle OFF -> use fake_reload_fallback (truly suppress cycling)
+        --   external-mag entry (external_mag = true):
+        --     force_bolt_cycle_external_mag ON  -> play explicit bolt cycle (override)
+        --     force_bolt_cycle_external_mag OFF -> fall through to fake reload (anm_reload)
+        --     (the regular fake_reload_bolt_cycle toggle does NOT apply here)
+        local bolt_config = get_bolt_action_config(sec)
+        local is_external_mag_bolt = bolt_config and bolt_config.external_mag
+        local play_bolt_cycle = bolt_config and (
+            (is_external_mag_bolt and force_bolt_cycle_external_mag) or
+            ((not is_external_mag_bolt) and fake_reload_bolt_cycle)
+        )
+        print_dbg("check_Ammo trace for %s: bolt_config=%s, is_external_mag=%s, force=%s, toggle=%s, play_bolt_cycle=%s",
+            sec, tostring(bolt_config ~= nil), tostring(is_external_mag_bolt),
+            tostring(force_bolt_cycle_external_mag), tostring(fake_reload_bolt_cycle), tostring(play_bolt_cycle))
+
+        if bolt_config and not play_bolt_cycle and not is_external_mag_bolt then
+            -- internal-mag bolt-action with toggle off -> fake_reload_fallback
+            print_dbg("Ammo check for %s - bolt-action toggle OFF, using fake_reload_fallback=%s.", sec, fake_reload_fallback)
+            if fake_reload_fallback == 0 then
+                ac_pending_slot = actor:active_slot()
+                actor:activate_slot(0)
+                weapon_hidden = true
+                CreateTimeEvent("ammo_check", "restore_weapon", 0, restore_weapon_callback)
+            else
+                game.actor_lower_weapon(true)
+                CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+            end
+            return
+        end
+
+        if bolt_config and play_bolt_cycle then
+            local use_custom_anim = bolt_config.anim and has_animation(sec, bolt_config.anim)
+            local use_open_close = has_animation(sec, "anm_open") and has_animation(sec, "anm_close")
+            local delay = bolt_config.delay or 0.7  -- default delay if not specified
+
+            -- priority 1: use custom animation if specified and exists
+            if use_custom_anim then
+                print_dbg("Ammo check for %s - bolt-action, using custom %s animation.", sec, bolt_config.anim)
+
+                do_ammo_check_anim = 1  -- mark that we're doing our own animation
+                is_fake_reload = true   -- prevent auto-check duplicate
+
+                det_active = actor:active_detector() or nil
+                if det_active then
+                    det_active:switch_state(2)
                 end
+
+                -- eject one round if option enabled and there's ammo
+                if fake_reload_bolt_eject and currentAmmo > 0 then
+                    local ammo_section = get_vanilla_ammo_section(weapon)
+                    if ammo_section then
+                        weapon:set_ammo_elapsed(currentAmmo - 1)
+                        alife_create_item(ammo_section, actor, { ammo = 1 })
+                        print_dbg("Ejected round: %s (remaining: %d)", ammo_section, currentAmmo - 1)
+                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag =
+                            get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
+                    end
+                end
+
+                play_hud_animation(weapon, bolt_config.anim, bolt_config.sound)
+                CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+                CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
+                return
+
+            -- priority 2: use anm_open/anm_close (either as configured or as fallback)
+            elseif use_open_close then
+                print_dbg("Ammo check for %s - bolt-action, using open/close with %.2fs delay.", sec, delay)
+
+                do_ammo_check_anim = 1  -- mark that we're doing our own animation
+                is_fake_reload = true   -- prevent auto-check duplicate
+
+                det_active = actor:active_detector() or nil
+                if det_active then
+                    det_active:switch_state(2)
+                end
+
+                -- eject one round if option enabled and there's ammo
+                if fake_reload_bolt_eject and currentAmmo > 0 then
+                    local ammo_section = get_vanilla_ammo_section(weapon)
+                    if ammo_section then
+                        weapon:set_ammo_elapsed(currentAmmo - 1)
+                        alife_create_item(ammo_section, actor, { ammo = 1 })
+                        print_dbg("Ejected round: %s (remaining: %d)", ammo_section, currentAmmo - 1)
+                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag =
+                            get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
+                    end
+                end
+
+                play_open_close_animation(weapon, delay)
+                CreateTimeEvent("ammo_check", "message_delay", delay + BOLT_PUMP_MSG_OFFSET, delayed_display_callback)
+                return
             end
         end
         
-        -- check 3: pump-action shotgun (if MCM option enabled)
-        if fake_reload_pump_rack then
-            local pump_config = get_pump_action_config(sec)
-            if pump_config then
-                local use_custom_anim = pump_config.anim and has_animation(sec, pump_config.anim)
-                local use_open_close = has_animation(sec, "anm_open") and has_animation(sec, "anm_close")
-                local delay = pump_config.delay or 0.5  -- default delay if not specified
-                
-                -- priority 1: use custom animation if specified and exists
-                if use_custom_anim then
-                    print_dbg("Ammo check for %s - pump-action, using custom %s animation.", sec, pump_config.anim)
-                    
-                    do_ammo_check_anim = 1  -- mark that we're doing our own animation
-                    is_fake_reload = true   -- prevent auto-check duplicate
-                    
-                    det_active = actor:active_detector() or nil
-                    if det_active then
-                        det_active:switch_state(2)
-                    end
-                    
-                    -- eject one shell if option enabled, there's ammo, and weapon not excluded
-                    if fake_reload_pump_eject and currentAmmo > 0 and not should_exclude_shell_eject(sec) then
-                        local ammo_section = get_vanilla_ammo_section(weapon)
-                        if ammo_section then
-                            weapon:set_ammo_elapsed(currentAmmo - 1)
-                            alife_create_item(ammo_section, actor, { ammo = 1 })
-                            print_dbg("Ejected shell: %s (remaining: %d)", ammo_section, currentAmmo - 1)
-                            ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag = 
-                                get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
-                        end
-                    end
-                    
-                    play_hud_animation(weapon, pump_config.anim, pump_config.sound)
-                    CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
-                    CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
-                    return
-                    
-                -- priority 2: use anm_open/anm_close (either as configured or as fallback)
-                elseif use_open_close then
-                    print_dbg("Ammo check for %s - pump-action, using open/close with %.2fs delay.", sec, delay)
-                    
-                    do_ammo_check_anim = 1  -- mark that we're doing our own animation
-                    is_fake_reload = true   -- prevent auto-check duplicate
-                    
-                    det_active = actor:active_detector() or nil
-                    if det_active then
-                        det_active:switch_state(2)
-                    end
-                    
-                    -- eject one shell if option enabled, there's ammo, and weapon not excluded
-                    if fake_reload_pump_eject and currentAmmo > 0 and not should_exclude_shell_eject(sec) then
-                        local ammo_section = get_vanilla_ammo_section(weapon)
-                        if ammo_section then
-                            weapon:set_ammo_elapsed(currentAmmo - 1)
-                            alife_create_item(ammo_section, actor, { ammo = 1 })
-                            print_dbg("Ejected shell: %s (remaining: %d)", ammo_section, currentAmmo - 1)
-                            ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag = 
-                                get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
-                        end
-                    end
-                    
-                    play_open_close_animation(weapon, delay)
-                    CreateTimeEvent("ammo_check", "message_delay", delay + BOLT_PUMP_MSG_OFFSET, delayed_display_callback)
-                    return
+        -- check 3: pump-action shotgun
+        -- Toggle OFF + normal entry: route to fake_reload_fallback (truly stops pump-racking).
+        -- Toggle OFF + no_cycle flag: still fall through to fake reload (anm_reload IS the pump
+        --   rack visual for these guns anyway, and they're marked specifically to use it).
+        -- Toggle ON + no_cycle flag: skip explicit cycle, fall through to fake reload.
+        -- Toggle ON + normal entry: play anm_open/close or custom anim as before.
+        local pump_config = get_pump_action_config(sec)
+        if pump_config and not fake_reload_pump_rack and not pump_config.no_cycle then
+            print_dbg("Ammo check for %s - pump-action toggle OFF, using fake_reload_fallback=%s.", sec, fake_reload_fallback)
+            if fake_reload_fallback == 0 then
+                ac_pending_slot = actor:active_slot()
+                actor:activate_slot(0)
+                weapon_hidden = true
+                CreateTimeEvent("ammo_check", "restore_weapon", 0, restore_weapon_callback)
+            else
+                game.actor_lower_weapon(true)
+                CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+            end
+            return
+        end
+
+        if pump_config and not pump_config.no_cycle then
+            local use_custom_anim = pump_config.anim and has_animation(sec, pump_config.anim)
+            local use_open_close = has_animation(sec, "anm_open") and has_animation(sec, "anm_close")
+            local delay = pump_config.delay or 0.5  -- default delay if not specified
+
+            -- priority 1: use custom animation if specified and exists
+            if use_custom_anim then
+                print_dbg("Ammo check for %s - pump-action, using custom %s animation.", sec, pump_config.anim)
+
+                do_ammo_check_anim = 1  -- mark that we're doing our own animation
+                is_fake_reload = true   -- prevent auto-check duplicate
+
+                det_active = actor:active_detector() or nil
+                if det_active then
+                    det_active:switch_state(2)
                 end
+
+                -- eject one shell if option enabled, there's ammo, and weapon not excluded
+                if fake_reload_pump_eject and currentAmmo > 0 and not should_exclude_shell_eject(sec) then
+                    local ammo_section = get_vanilla_ammo_section(weapon)
+                    if ammo_section then
+                        weapon:set_ammo_elapsed(currentAmmo - 1)
+                        alife_create_item(ammo_section, actor, { ammo = 1 })
+                        print_dbg("Ejected shell: %s (remaining: %d)", ammo_section, currentAmmo - 1)
+                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag =
+                            get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
+                    end
+                end
+
+                play_hud_animation(weapon, pump_config.anim, pump_config.sound)
+                CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+                CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
+                return
+
+            -- priority 2: use anm_open/anm_close (either as configured or as fallback)
+            elseif use_open_close then
+                print_dbg("Ammo check for %s - pump-action, using open/close with %.2fs delay.", sec, delay)
+
+                do_ammo_check_anim = 1  -- mark that we're doing our own animation
+                is_fake_reload = true   -- prevent auto-check duplicate
+
+                det_active = actor:active_detector() or nil
+                if det_active then
+                    det_active:switch_state(2)
+                end
+
+                -- eject one shell if option enabled, there's ammo, and weapon not excluded
+                if fake_reload_pump_eject and currentAmmo > 0 and not should_exclude_shell_eject(sec) then
+                    local ammo_section = get_vanilla_ammo_section(weapon)
+                    if ammo_section then
+                        weapon:set_ammo_elapsed(currentAmmo - 1)
+                        alife_create_item(ammo_section, actor, { ammo = 1 })
+                        print_dbg("Ejected shell: %s (remaining: %d)", ammo_section, currentAmmo - 1)
+                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag =
+                            get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
+                    end
+                end
+
+                play_open_close_animation(weapon, delay)
+                CreateTimeEvent("ammo_check", "message_delay", delay + BOLT_PUMP_MSG_OFFSET, delayed_display_callback)
+                return
             end
         end
         

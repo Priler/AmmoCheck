@@ -28,6 +28,46 @@ local string_find = string.find
 config_cache = {}
 
 
+--[ Per-weapon ammo check override ]--
+-- TOP-PRIORITY override. Bypasses all other animation logic (path A, fake reload,
+-- bolt cycle, lists, fallback) and forces the chosen behavior. Use when none of the
+-- other heuristics produce the right visual for a specific weapon.
+--
+-- DEFAULT-mode fields (used when MCM "Force Bolt Cycle for External-Mag Rifles" is OFF,
+-- or when the entry has no force_* counterpart). Pick ONE:
+--   anim = "anm_name", sound = "snd_param"   -- force-play this animation
+--   fake_reload = true                       -- standard fake-reload path (anm_reload + empty-mag handling)
+--   fallback = true                          -- no animation, route to fake_reload_fallback (lower / hide)
+--
+-- FORCE-mode fields (used INSTEAD of the default fields when MCM "Force Bolt Cycle for
+-- External-Mag Rifles" is ON, and at least one force_* is set on the entry). Pick ONE:
+--   force_anim = "anm_name", force_sound = "snd_param"
+--   force_fake_reload = true
+--   force_fallback = true
+--
+-- Longest-prefix match wins (so wpn_l96a1_tactical can override wpn_l96a1).
+ammo_check_override = {
+    -- For wpn_l96a1 the engine's anm_reload visual is itself a bolt cycle, so neither
+    -- fake reload nor explicit bolt cycle look right by default.
+
+    -- this weapon's anm_reload plays cycle bolt
+    -- and anm_reload_empty plays full external mag reload
+    -- (including bolt cycle before/after ejecting/inserting the mag)
+    -- ...
+    -- anm_ammo_check plays the cycle bolt as well (so there's no proper ammo check animation)
+    ["wpn_l96a1"] = {
+        anim = "anm_ammo_check", sound = "snd_ammo_check",
+        force_anim = "anm_ammo_check", force_sound = "snd_ammo_check", -- force is for "Force Bolt Cycle External Mag"
+    },
+
+    -- Other shapes you can use for any weapon:
+    -- ["wpn_example_a"] = { fake_reload = true },                       -- default uses standard fake reload
+    -- ["wpn_example_b"] = { fallback = true },                          -- default uses fake_reload_fallback (lower / hide)
+    -- ["wpn_example_c"] = { anim = "anm_bore", sound = "snd_bore",      -- mixed: anim default, force-mode falls back to fallback
+    --                       force_fallback = true },
+}
+
+
 --[ Break-action shotguns ]--
 -- These use a custom animation (usually anm_bore or anm_idle)
 -- Format: [prefix] = { anim = "animation_name", sound = "sound_param" }
@@ -39,21 +79,40 @@ break_action_shotguns = {
 
 
 --[ Bolt-action rifles ]--
--- These play anm_open -> delay -> anm_close (bolt cycle)
+-- These play anm_open -> delay -> anm_close (bolt cycle), or a custom single-shot anim.
 -- Format: [prefix] = { delay = seconds_between_open_and_close }
+--     OR: [prefix] = { anim = "anm_name", sound = "snd_param", delay = fallback_seconds }
+-- Optional flags:
+--   override_inspect = true   -- ignore anm_ammo_check inspect anim and force bolt cycle
+--                                (use when the weapon defines both, but bolt cycle looks better;
+--                                only applies to internal-mag entries).
+--   external_mag = true       -- this bolt-action variant has a detachable / external magazine.
+--                                Default behavior: SKIP the explicit anm_open/anm_close cycle
+--                                and fall through to fake reload (engine's anm_reload).
+--                                When MCM "force_bolt_cycle_external_mag" is ON, the explicit
+--                                bolt cycle plays anyway (delay/anim/sound from this entry).
+--                                The regular fake_reload_bolt_cycle toggle does NOT affect
+--                                external_mag entries (the force option does).
 bolt_action_rifles = {
-    ["wpn_k98"] = { delay = 1.3 },
+    ["wpn_k98"] = { delay = 1.3, override_inspect = true }, -- has both inspect anim and bolt cycle; prefer bolt cycle
     ["wpn_shiv"] = { delay = 1.2 },
     ["wpn_obrez"] = { delay = 1.2 }, -- mosin obrez
-    ["wpn_mosin_carbine"] = { delay = 1.2 }, -- mosin (from Kmack "Mosin Trio" mod)
-    ["wpn_mosin_k"] = { delay = 1.3 }, -- mosin (from Kmack "Mosin Trio" mod)
+    ["wpn_mosin_carbine"] = { delay = 1.2 }, -- mosin carbine (from Kmack "Mosin Trio" mod)
+    ["wpn_mosin_k"] = { delay = 1.2 }, -- mosin (from Kmack "Mosin Trio" mod)
+    -- ["wpn_mosin_k"] = { anim = "anm_bore", sound = "snd_bore", delay = 0.8 }, -- mosin (Kmack); use anm_bore (single-shot cycle) to avoid bolt snap-back; delay is fallback if anm_bore is missing
 
     ["wpn_sks_molot"] = { delay = 1.3 },
 
+    -- External-mag bolt-action variants. Default: fake reload (anm_reload).
+    -- With MCM "force_bolt_cycle_external_mag" ON: play explicit bolt cycle using the
+    -- delay/anim below. Longer prefixes here override shorter base prefixes (e.g. wpn_k98).
+    ["wpn_l96a1"] = { external_mag = true, delay = 0.7 },
+    ["wpn_remington700"] = { external_mag = true, delay = 0.7 },
+    ["wpn_k98_mauser_kit"] = { external_mag = true, delay = 1.3 },   -- detachable-mag K98 variant
+    ["wpn_k98_mod_silen98"] = { external_mag = true, delay = 1.3 },  -- silenced detachable-mag K98 variant
 
     -- ["wpn_springfield"] = { delay = 0.7 },
     -- ["wpn_m24"] = { delay = 0.8 },
-    -- ["wpn_remington700"] = { delay = 0.7 },
     -- ["wpn_cz550"] = { delay = 0.7 },
     -- ["wpn_scout"] = { delay = 0.6 },
     -- ["wpn_sks"] = { delay = 0.5 },
@@ -147,8 +206,12 @@ sniper_animations = {
 -- Weapons in this list will never use fake reload animations,
 -- regardless of the "Fake Reload" animation mode setting.
 -- They will fall back to the selected fallback behavior.
--- Format: [prefix] = true
--- * bruh probably should named it "ignore_fake_reload" .. but I'm too lazy boboo :3
+-- Format:
+--   [prefix] = true   -- ignore this weapon (use fake_reload_fallback)
+--   [prefix] = false  -- explicit override (use when a longer-named variant shouldn't
+--                        inherit a shorter prefix's true. E.g. wpn_mosin = true catches
+--                        wpn_mosin_k by prefix, so wpn_mosin_k = false opts it back out.)
+-- Longest-prefix match wins.
 ignore_fake_animations = {
     ["wpn_g36ka4_rwap"] = true, -- Mag Palming (non-immersive)
     ["wpn_g36c_rwap"] = true, -- Mag Palming (non-immersive)
@@ -163,7 +226,9 @@ ignore_fake_animations = {
     ["wpn_m16"] = true, -- drops magazine (non-immersive)
     ["wpn_vintorez_nimble"] = true, -- drops magazine (non-immersive)
 
-    ["wpn_mosin"] = true, -- full ammo change (non-immersive)
+    ["wpn_mosin"] = true,         -- full ammo change (non-immersive) -- vanilla mosin only
+    ["wpn_mosin_k"] = false,      -- Kmack Mosin Trio variant: opt back out (bolt_action_rifles handles it)
+    ["wpn_mosin_carbine"] = false, -- Kmack Mosin Trio variant: opt back out
 
     -- Vanilla anomaly guns
     -- ["wpn_usp_nimble"] = true, -- drops magazine (non-immersive)
@@ -221,6 +286,25 @@ local function find_best_match(sec, weapon_table)
     return best_config
 end
 
+function get_ammo_check_override(sec)
+    if not sec then return nil end
+
+    local cache_key = "override_" .. sec
+    if config_cache[cache_key] ~= nil then
+        if config_cache[cache_key] == false then return nil end
+        return config_cache[cache_key]
+    end
+
+    local config = find_best_match(sec, ammo_check_override)
+    if config then
+        config_cache[cache_key] = config
+        return config
+    end
+
+    config_cache[cache_key] = false
+    return nil
+end
+
 function get_break_action_config(sec)
     if not sec then return nil end
     
@@ -245,22 +329,21 @@ end
 
 function get_bolt_action_config(sec)
     if not sec then return nil end
-    
+
     -- Check cache first
     local cache_key = "bolt_" .. sec
     if config_cache[cache_key] ~= nil then
         if config_cache[cache_key] == false then return nil end
         return config_cache[cache_key]
     end
-    
-    -- Search weapon table (longest prefix match)
+
+    -- Longest-prefix match wins (so wpn_k98_mauser_kit beats wpn_k98)
     local config = find_best_match(sec, bolt_action_rifles)
     if config then
         config_cache[cache_key] = config
         return config
     end
-    
-    -- Cache negative result
+
     config_cache[cache_key] = false
     return nil
 end
@@ -355,24 +438,31 @@ end
 
 function should_ignore_fake_animations(sec)
     if not sec then return false end
-    
+
     -- Check cache first
     local cache_key = "ignore_" .. sec
     if config_cache[cache_key] ~= nil then
         return config_cache[cache_key]
     end
-    
-    -- Search ignore list
-    for prefix, _ in pairs(ignore_fake_animations) do
+
+    -- Longest-prefix match wins. Values are boolean:
+    --   true  = ignore this weapon
+    --   false = explicit override of a shorter true-prefix (so e.g. wpn_mosin = true
+    --           doesn't accidentally swallow wpn_mosin_k or wpn_mosin_carbine)
+    local best_len = 0
+    local best_val = false
+    for prefix, value in pairs(ignore_fake_animations) do
         if sec == prefix or string.find(sec, "^" .. prefix) then
-            config_cache[cache_key] = true
-            return true
+            local len = string.len(prefix)
+            if len > best_len then
+                best_len = len
+                best_val = value and true or false
+            end
         end
     end
-    
-    -- Cache negative result
-    config_cache[cache_key] = false
-    return false
+
+    config_cache[cache_key] = best_val
+    return best_val
 end
 
 function should_exclude_shell_eject(sec)

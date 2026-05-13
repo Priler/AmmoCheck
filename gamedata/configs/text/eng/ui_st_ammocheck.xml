@@ -91,6 +91,18 @@
     </string>
 
     <!-- Display Settings -->
+    <string id="ui_mcm_rax_ammo_check_show_message">
+        <text>Show Ammo Message</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_show_message_desc">
+        <text>Display the ammo status text after checking. Turn OFF to play only the animation with no on-screen message.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hide_msg_on_inspect">
+        <text>Hide Message Only on Inspect Animation</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hide_msg_on_inspect_desc">
+        <text>When ON, the ammo message is hidden ONLY for weapons that play a proper inspect animation (anm_ammo_check). Weapons that fall back to fake reload, bolt cycle, lower weapon, or hide/show still display the message. Requires "Show Ammo Message" to be ON.</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_usecolor">
         <text>Colored Messages</text>
     </string>
@@ -247,11 +259,23 @@
     <string id="rax_ammo_check_empty_mag_fallback_lst_empty_mag_lower">
         <text>Lower Weapon</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_treat_one_chamber_as_non_empty">
+        <text>Treat 1 in a Chamber as Non-Empty Mag</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_treat_one_chamber_as_non_empty_desc">
+        <text>By default (OFF), a weapon with only 1 round left (just the chambered round, magazine itself empty) plays anm_ammo_check_empty - the magazine is empty after all. Enable this to revert to the engine default: anm_ammo_check (full inspect) still plays because total ammo > 0. Only affects weapons that define anm_ammo_check_empty in their HUD config.</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_cycle">
         <text>Bolt-Action: Cycle Bolt</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_cycle_desc">
-        <text>For bolt-action rifles (Kar98, Springfield, etc.) play bolt open/close animation instead of fallback.</text>
+        <text>For INTERNAL-mag bolt-action rifles (Kar98, Mosin, etc.) play bolt open/close animation instead of fallback. Does not affect external-mag variants (see option below).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_force_bolt_cycle_external_mag">
+        <text>Force Bolt Cycle for External-Mag Rifles</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_force_bolt_cycle_external_mag_desc">
+        <text>By default, bolt-action rifles with detachable magazines (L96A1, Remington 700, K98 Mauser Kit, etc.) play fake reload (anm_reload). Enable this to force them to play the explicit bolt cycle animation (anm_open/anm_close) instead. Useful if you prefer consistent bolt-cycling for all bolt-action rifles regardless of magazine type.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_eject">
         <text>Bolt-Action: Eject Round</text>
@@ -263,7 +287,7 @@
         <text>Pump-Action: Rack Slide</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_pump_rack_desc">
-        <text>For pump-action shotguns (KS23, Remington 870, etc.) play pump open/close animation instead of fallback.</text>
+        <text>For pump-action shotguns (Remington 870, etc.) play pump open/close animation instead of fallback.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_pump_eject">
         <text>Pump-Action: Eject Shell</text>

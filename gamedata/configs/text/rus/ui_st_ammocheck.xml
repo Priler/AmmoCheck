@@ -91,6 +91,18 @@
     </string>
 
     <!-- Display Settings -->
+    <string id="ui_mcm_rax_ammo_check_show_message">
+        <text>Показывать сообщение о патронах</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_show_message_desc">
+        <text>Отображать сообщение после проверки. Отключите, чтобы оставалась только анимация без вывода сообщения на экран.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hide_msg_on_inspect">
+        <text>Скрывать сообщение только при анимации осмотра</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hide_msg_on_inspect_desc">
+        <text>Если вкл., сообщение скрывается ТОЛЬКО для оружия с настоящей анимацией осмотра (anm_ammo_check). Оружие с фейковой перезарядкой, циклом затвора, опусканием или скрытием по-прежнему показывает сообщение. Требует "Показывать сообщение о патронах" вкл.</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_usecolor">
         <text>Цветные сообщения</text>
     </string>
@@ -244,11 +256,23 @@
     <string id="rax_ammo_check_empty_mag_fallback_lst_empty_mag_lower">
         <text>Опустить оружие</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_treat_one_chamber_as_non_empty">
+        <text>Считать "1 в патроннике" не пустым магазином</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_treat_one_chamber_as_non_empty_desc">
+        <text>По умолчанию (ВЫКЛ.), если в оружии остался только 1 патрон в патроннике (магазин сам по себе пуст), проигрывается anm_ammo_check_empty - магазин ведь действительно пустой. Включите, чтобы вернуться к стандартному поведению движка: anm_ammo_check (полный осмотр) проигрывается, так как общий боезапас > 0. Влияет только на оружие, у которого определена anm_ammo_check_empty в HUD-конфиге.</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_cycle">
         <text>Болтовые винтовки: передёргивать затвор</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_cycle_desc">
         <text>Для болтовых винтовок (Kar98, Springfield и т.д.) проигрывать анимацию передёргивания затвора вместо запасной.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_force_bolt_cycle_external_mag">
+        <text>Принудительный цикл затвора для винтовок с внешним магазином</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_force_bolt_cycle_external_mag_desc">
+        <text>По умолчанию болтовые винтовки со съёмным магазином (L96A1, Remington 700, K98 Mauser Kit и т.п.) проигрывают фейковую перезарядку (anm_reload). Включите, чтобы они принудительно проигрывали явную анимацию цикла затвора (anm_open/anm_close). Полезно, если предпочитаете единообразное передёргивание для всех болтовых винтовок независимо от типа магазина.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_bolt_eject">
         <text>Болтовые винтовки: выброс патрона</text>
@@ -260,7 +284,7 @@
         <text>Помповые: передёргивать цевьё</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_pump_rack_desc">
-        <text>Для помповых дробовиков (КС-23, Remington 870 и т.д.) проигрывать анимацию передёргивания цевья вместо запасной.</text>
+        <text>Для помповых дробовиков (Remington 870 и т.д.) проигрывать анимацию передёргивания цевья вместо запасной.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fake_reload_pump_eject">
         <text>Помповые: выброс патрона</text>
