@@ -131,6 +131,93 @@
     <string id="rax_ammo_check_display_mode_lst_dm_both">
         <text>Text + Numeric</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_minimalist_bar">
+        <text>Minimalist Bar Display</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_minimalist_bar_desc">
+        <text>Replace the ammo message with a minimalist 6-segment block bar (filled blocks for remaining ammo) instead of text or numbers. Handles "1 in the chamber" (+), empty/no magazine (X______), jammed (X) and grenade (o) too. Overrides Display Mode. Colored Messages still tints the bar by ammo level.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_custom_render">
+        <text>Custom Text Render</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_custom_render_desc">
+        <text>Draw the ammo message as a styled HUD overlay (selectable font, size and screen position, with a drop shadow) instead of the default top-left pickup line. Works with Colored Messages, Display Mode, Minimalist Bar, ammo type/tag and the second highlight line.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_font_family">
+        <text>Render Font</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_font_family_desc">
+        <text>Font family used by Custom Text Render.</text>
+    </string>
+    <string id="rax_ammo_check_render_font_family_lst_ff_graffiti">
+        <text>Graffiti</text>
+    </string>
+    <string id="rax_ammo_check_render_font_family_lst_ff_letterica">
+        <text>Letterica</text>
+    </string>
+    <string id="rax_ammo_check_render_font_family_lst_ff_system">
+        <text>System</text>
+    </string>
+    <string id="rax_ammo_check_render_font_family_lst_ff_letterica_pure">
+        <text>Letterica (Pure)</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_font_size">
+        <text>Render Font Size</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_font_size_desc">
+        <text>Font size used by Custom Text Render.</text>
+    </string>
+    <string id="rax_ammo_check_render_font_size_lst_fs_small">
+        <text>Small</text>
+    </string>
+    <string id="rax_ammo_check_render_font_size_lst_fs_medium">
+        <text>Medium</text>
+    </string>
+    <string id="rax_ammo_check_render_font_size_lst_fs_large">
+        <text>Large</text>
+    </string>
+    <string id="rax_ammo_check_render_font_size_lst_fs_large_plus">
+        <text>Large+</text>
+    </string>
+    <string id="rax_ammo_check_render_font_size_lst_fs_xlarge">
+        <text>Extra Large</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_position">
+        <text>Render Position</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_position_desc">
+        <text>Where the Custom Text Render message appears on screen.</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_tl">
+        <text>Top Left</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_tr">
+        <text>Top Right</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_center">
+        <text>Center</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_bottom">
+        <text>Bottom Center</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_cursor_left">
+        <text>Near Cursor - Left</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_cursor_top">
+        <text>Near Cursor - Top</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_cursor_right">
+        <text>Near Cursor - Right</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_cursor_bottom">
+        <text>Near Cursor - Bottom</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_cursor_gap">
+        <text>Cursor Distance</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_cursor_gap_desc">
+        <text>Distance (pixels) from the crosshair to the message, for the "Near Cursor" render positions. No effect on the other positions.</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_show_ammo_type">
         <text>Show Ammo Type</text>
     </string>
@@ -147,7 +234,7 @@
         <text>Ammo Type Highlight</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_highlight_ammo_mode_desc">
-        <text>Color the message based on ammo type. None: use ammo level color. Whole message: color entire line by ammo type. Separate lines: show ammo tag on second line with its color.</text>
+        <text>Color the message based on ammo type. None: use ammo level color. Whole message: color entire line by ammo type. Separate lines: show ammo tag on second line with its color. Combined: keep the ammo-level color on the main text/bar AND color the ammo type/tag (inline with Custom Text Render; on a second line otherwise).</text>
     </string>
     <!-- Highlight Ammo Mode List Options (no ui_mcm_ prefix for list values) -->
     <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_none">
@@ -158,6 +245,9 @@
     </string>
     <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_separate">
         <text>Separate Lines</text>
+    </string>
+    <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_combined">
+        <text>Combined</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_msg_duration">
         <text>Message Duration</text>

@@ -130,7 +130,92 @@
     <string id="rax_ammo_check_display_mode_lst_dm_both">
         <text>Текст и числа</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_show_ammo_type">
+    <string id="ui_mcm_rax_ammo_check_minimalist_bar">
+        <text>Минималистичная шкала</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_minimalist_bar_desc">
+        <text>Заменяет сообщение о патронах минималистичной шкалой из 6 блоков (закрашенные блоки = остаток патронов) вместо текста или цифр. Также обрабатывает "один в патроннике" (+), пустой/отсутствующий магазин (X______), заклинивание (X) и гранату (o). Переопределяет режим отображения. При включённых цветных сообщениях шкала окрашивается по уровню боезапаса.</text>
+    </string>    <string id="ui_mcm_rax_ammo_check_custom_render">
+        <text>Альт. рендер текста</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_custom_render_desc">
+        <text>Продвинутая отрисовка текста. Рисует сообщение о патронах как стилизованный оверлей HUD (выбор шрифта, размера и положения на экране, с тенью) вместо стандартной строки.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_font_family">
+        <text>Шрифт альт. рендера</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_font_family_desc">
+        <text>Семейство шрифта для альт. рендера текста.</text>
+    </string>
+    <string id="rax_ammo_check_render_font_family_lst_ff_graffiti">
+        <text>Graffiti</text>
+    </string>
+    <string id="rax_ammo_check_render_font_family_lst_ff_letterica">
+        <text>Letterica</text>
+    </string>
+    <string id="rax_ammo_check_render_font_family_lst_ff_system">
+        <text>Системный</text>
+    </string>
+    <string id="rax_ammo_check_render_font_family_lst_ff_letterica_pure">
+        <text>Letterica (чистый)</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_font_size">
+        <text>Размер шрифта альт. рендера</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_font_size_desc">
+        <text>Размер шрифта для альт. рендера текста.</text>
+    </string>
+    <string id="rax_ammo_check_render_font_size_lst_fs_small">
+        <text>Маленький</text>
+    </string>
+    <string id="rax_ammo_check_render_font_size_lst_fs_medium">
+        <text>Средний</text>
+    </string>
+    <string id="rax_ammo_check_render_font_size_lst_fs_large">
+        <text>Большой</text>
+    </string>
+    <string id="rax_ammo_check_render_font_size_lst_fs_large_plus">
+        <text>Большой+</text>
+    </string>
+    <string id="rax_ammo_check_render_font_size_lst_fs_xlarge">
+        <text>Очень большой</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_position">
+        <text>Положение альт. рендера</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_position_desc">
+        <text>Где на экране появляется сообщение альт. рендера текста.</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_tl">
+        <text>Сверху слева</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_tr">
+        <text>Сверху справа</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_center">
+        <text>По центру</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_bottom">
+        <text>Снизу по центру</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_cursor_left">
+        <text>У прицела - слева</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_cursor_top">
+        <text>У прицела - сверху</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_cursor_right">
+        <text>У прицела - справа</text>
+    </string>
+    <string id="rax_ammo_check_render_position_lst_rp_cursor_bottom">
+        <text>У прицела - снизу</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_cursor_gap">
+        <text>Расстояние до прицела</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_render_cursor_gap_desc">
+        <text>Расстояние (в пикселях) от прицела до сообщения для положений "У прицела". На остальные положения не влияет.</text>
+    </string>    <string id="ui_mcm_rax_ammo_check_show_ammo_type">
         <text>Показывать тип патронов</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_show_ammo_type_desc">
@@ -146,13 +231,16 @@
         <text>Подсветка типа патронов</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_highlight_ammo_mode_desc">
-        <text>Окрашивать сообщение по типу патронов. "Нет" - цвет по уровню заполнения. "Всё сообщение" - вся строка цветом типа патронов. "Отдельной строкой" - метка на второй строке своим цветом.</text>
+        <text>Окрашивать сообщение по типу патронов. "Нет" - цвет по уровню заполнения. "Всё сообщение" - вся строка цветом типа патронов. "Отдельной строкой" - метка на второй строке своим цветом. "Комбинированно" - основной текст/шкала сохраняют цвет уровня, а тип/метка патрона окрашиваются по типу (встроенно при Своём рендере текста, иначе на второй строке).</text>
     </string>
     <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_none">
         <text>Нет</text>
     </string>
     <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_whole">
         <text>Всё сообщение</text>
+    </string>
+    <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_combined">
+        <text>Комбинированно</text>
     </string>
     <string id="rax_ammo_check_highlight_ammo_mode_lst_ham_separate">
         <text>Отдельной строкой</text>

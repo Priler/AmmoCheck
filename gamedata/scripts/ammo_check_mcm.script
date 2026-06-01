@@ -62,8 +62,14 @@ local show_message = true       -- show ammo message after check; false = animat
 local hide_msg_on_inspect = false -- when true, suppress message only when a real anm_ammo_check is playing
 local ac_pending_inspect_anim_playing = false  -- state flag: true when path A lets the native inspect anim run; gates hide_msg_on_inspect. MUST be declared above display_ammo_status so its upvalue capture sees this local (Lua resolves names at function-definition time).
 local ac_inspect_pending = false  -- arms the mutator to override engine's anm_bore -> anm_ammo_check[_empty|_no_mag] in path A only. Distinct from do_ammo_check_anim so fake-reload paths (which use play_hud_motion) don't have their explicit anim_name rewritten by the mutator.
-local ac_cooldown_until = 0  -- time_global() value (ms) when the ammo-check-key cooldown expires. Set when a message is actually displayed; subsequent key presses while >0 and not yet elapsed are ignored. MUST be above check_Ammo so the closure captures it.
-local ac_last_weapon_id = 0  -- weapon id the displayed message is about. If the player switches weapons before the cooldown expires, the next key press resets the cooldown + hides the stale text and proceeds with the new weapon.
+local ac_cooldown_until = 0  -- time_global() value (ms) when the ammo-check-key cooldown expires. Fixed AC_COOLDOWN_MS window from when check_Ammo commits. Subsequent key presses for the SAME weapon while still in cooldown are ignored.
+local ac_last_weapon_id = 0  -- weapon id the previous check was for. If the player switches weapons, the next key press resets cooldown + hides stale text and proceeds with the new weapon.
+local ac_message_until = 0   -- time_global() value (ms) when the displayed message visually disappears. Tracked separately from cooldown because msg_duration (1-5s) may outlive the cooldown (3s) - we hide the stale message before processing the next press.
+
+-- Fixed cooldown window for the ammo-check key, independent of msg_duration (which only
+-- affects how long the text stays on screen). Keep short so the player can re-trigger
+-- quickly; long enough to cover typical animation+display setup time.
+local AC_COOLDOWN_MS = 3000
 local use_clr = true
 local hide_counter = true
 local hide_ammo_icon = true
@@ -86,6 +92,12 @@ local fake_reload_ignore_list = true -- use ignore list for non-immersive fake r
 local enable_animations = true       -- master switch for all animations
 local check_grenade_mode = false
 local display_mode = 0          -- 0: text, 1: numeric, 2: both
+local minimalist_bar = false    -- when true, replace text/numeric message with a 6-segment block bar (mirrors standalone "Minimalist Ammo Check" mod)
+local custom_render = true      -- when true, draw the message via a custom styled HUD overlay (font/size/position) instead of actor_menu.set_msg (Cheeki Numbers render technique)
+local render_font_family = 0    -- 0: Graffiti, 1: Letterica, 2: System, 3: Letterica Pure
+local render_font_size = 3      -- size index 1..5 into the font-family table (5 = large+)
+local render_position = 3       -- 0: top-left, 1: top-right, 2: center, 3: bottom-center, 4-7: near-cursor left/top/right/bottom
+local render_cursor_gap = 80    -- distance (virtual px) from the crosshair to the message for the near-cursor positions
 local auto_check_reload = false
 local color_intensity = 70
 local highlight_ammo_mode = 0   -- 0: none, 1: whole message, 2: separate lines
@@ -106,6 +118,8 @@ local RESTORE_DET_DELAY = 0.1           -- delay before checking to restore dete
 
 -- cached objects
 local ZERO_VECTOR = vector():set(0, 0, 0)  -- reusable zero vector for sound positioning
+local _shared_vec_render = vector2()       -- reused vector2 for all custom-render SetWndPos/SetWndSize calls
+local ac_overlay = nil                     -- singleton custom-render HUD overlay instance (lazily created)
 
 -- debug numpad key mappings
 local numpad_states = {
@@ -208,6 +222,35 @@ local function rebuild_messages()
 end
 rebuild_messages() -- initialize
 
+-- ### MINIMALIST BAR DISPLAY (inspired by the same mod from PissMaster64)
+-- A 6-segment block bar built from cp1251 byte 0x95 (renders as a filled block in the
+-- STALKER UI font) plus '_' for empty segments. Mirrors the standalone mod,
+---but generated in Lua
+-- glyphs in the XML string table. Keyed by the same st_ac_* message id the normal path
+-- would have selected, so the bar tracks every branch (level, plus1, chamber-only, etc.).
+local MIN_FILL = string_format("%c", 0x95)
+local function min_bar(n)
+    return string.rep(MIN_FILL, n) .. string.rep("_", 6 - n)
+end
+local MIN_BAR = {
+    st_ac_empty          = min_bar(0),         -- ______
+    st_ac_near_empty     = min_bar(1),         -- #_____
+    st_ac_less_half      = min_bar(2),         -- ##____
+    st_ac_about_half     = min_bar(3),         -- ###___
+    st_ac_more_half      = min_bar(4),         -- ####__
+    st_ac_nearly_full    = min_bar(5),         -- #####_
+    st_ac_full           = min_bar(6),         -- ######
+    st_ac_overfull       = min_bar(6),         -- ###### (overfull reads as full bar)
+    st_ac_plus1          = min_bar(6) .. "+",  -- ######+
+    st_ac_just_one       = MIN_FILL,           -- # (single round, 2-round weapons)
+    st_ac_jammed         = "X",
+    st_ac_grenade        = "o",
+    st_ac_noMag          = "X" .. string.rep("_", 6),  -- X______
+    st_ac_empty_mag_oitc = "+",                -- empty mag, 1 chambered
+    st_ac_no_mag_oitc    = "X+",               -- no mag, 1 chambered
+    st_ac_oitc           = "+",
+}
+
 local function update_colors()
     clr00_Red = apply_intensity(base_colors.clr00_Red, color_intensity)
     clr01_RedOrange = apply_intensity(base_colors.clr01_RedOrange, color_intensity)
@@ -245,7 +288,7 @@ end
 -- Load-time marker. Always fires when the script is loaded by the engine; bypasses
 -- debug_mode entirely so we can tell from the log whether the runtime is using the
 -- latest version. Look for this line near script load in xray_<user>.log.
-printf("![AC] ammo_check_mcm.script loaded (build 2026-05-14 trace)")
+printf("![AC] ammo_check_mcm.script loaded")
 
 -- debug logging
 local dbg_log
@@ -431,6 +474,287 @@ local function display_message(message, clr)
     if not show_message then return false end
     actor_menu.set_msg(1, message, msg_duration, clr)
     return true
+end
+
+-- ### CUSTOM HUD RENDER (inspired/taken from Cheeki Numbers mod by Cheeki Breeki)
+-- Styled on-screen message drawn over the HUD instead of the actor_menu message line.
+-- Fonts": CUIScriptWnd subclass + utils_xml.get_hud_xml():InitTextWnd + SetTextComplexMode
+-- (for %c color tags) + engine font getters + 1px black drop-shadow + AddDialogToRender.
+
+-- Font-family table (stores getter FUNCTIONS, called later).
+local AC_FONT_FAMILIES = {
+    -- 0: Graffiti           small             medium                large                 xlarge                 large+
+    { GetFontLetterica16Russian, GetFontGraffiti19Russian, GetFontGraffiti22Russian, GetFontGraffiti32Russian, GetFontLetterica25Russian },
+    -- 1: Letterica
+    { GetFontLetterica16Russian, GetFontLetterica18Russian, GetFontLetterica25Russian, GetFontLetterica25Russian, GetFontLetterica25Russian },
+    -- 2: System
+    { GetFontSmall, GetFontMedium, GetFontDI, GetFontGraffiti32Russian, GetFontLetterica25Russian },
+    -- 3: Letterica Pure
+    { GetFontLetterica16Russian, GetFontLetterica18Russian, GetFontLetterica25, GetFontLetterica25, GetFontLetterica25 },
+}
+
+-- returns a font getter FUNCTION (call it to get the font object)
+local function ac_get_font_func()
+    local fam = clamp(render_font_family or 0, 0, 3)
+    local sz  = clamp(render_font_size or 3, 1, 5)
+    local fam_t = AC_FONT_FAMILIES[fam + 1] or AC_FONT_FAMILIES[1]
+    return fam_t[sz] or GetFontGraffiti22Russian
+end
+
+-- decompose a packed ARGB int (GetARGB) into a "%c[a,r,g,b]" complex-text color tag
+local function argb_to_tag(clr)
+    if not clr then return "%c[255,255,255,255]" end
+    local a = bit.band(bit.rshift(clr, 24), 0xFF)
+    local r = bit.band(bit.rshift(clr, 16), 0xFF)
+    local g = bit.band(bit.rshift(clr, 8), 0xFF)
+    local b = bit.band(clr, 0xFF)
+    return string_format("%%c[%d,%d,%d,%d]", a, r, g, b)
+end
+
+local AC_SHADOW_TAG = "%c[255,0,0,0]"  -- opaque black, for the drop shadow (%c complex-mode lines)
+local AC_SHADOW_ARGB = GetARGB(255, 0, 0, 0)  -- opaque black, for SetTextColor (plain single-color lines)
+
+-- Build the shadow copy of a (possibly multi-color) string: keep every %c[a,r,g,b] tag
+-- in place but force R,G,B to 0 while PRESERVING alpha and the exact digit count. This
+-- keeps the shadow string the same character length as the foreground (so center/left
+-- alignment measures identical widths and the two layers line up), but renders solid black.
+local function ac_blacken_tags(s)
+    return (s:gsub("%%c%b[]", function(tag)
+        local inside = tag:sub(4, -2)  -- strip leading "%c[" and trailing "]"
+        local parts = {}
+        for n in inside:gmatch("[^,]+") do parts[#parts + 1] = n end
+        if #parts == 4 then
+            parts[2] = string.rep("0", #parts[2])  -- R, same width
+            parts[3] = string.rep("0", #parts[3])  -- G
+            parts[4] = string.rep("0", #parts[4])  -- B
+            return "%c[" .. table.concat(parts, ",") .. "]"
+        end
+        return tag
+    end))
+end
+local AC_RENDER_W = 800                -- text wnd width in 1024x768 virtual UI space
+local AC_LINE_SPACING = 20             -- vertical gap between line 1 and line 2
+
+class "ac_msg_overlay" (CUIScriptWnd)
+
+function ac_msg_overlay:__init() super()
+    self.xml = utils_xml.get_hud_xml()       -- shared pre-parsed HUD xml
+    self.font_func = ac_get_font_func()
+    self.visible_until = 0
+    self.added = false
+    self.registered = false
+    self.l1 = self:make_line()
+    self.l2 = self:make_line()
+    -- dedicated controls for Combined mode: main text + ammo tag rendered as two
+    -- side-by-side SINGLE-color (SetTextColor, no %c) controls, so the engine's
+    -- center/right alignment width quirk with mid-string %c tags can't open a gap.
+    self.l1main = self:make_line()
+    self.l1tag  = self:make_line()
+end
+
+-- build one text control (clones a vanilla HUD label node, inherits a usable skin).
+-- Shadow is created FIRST so the colored text (attached later) renders on top of it.
+function ac_msg_overlay:make_line()
+    local s = self.xml:InitTextWnd("companion_list:slot:distance", self)
+    s:SetFont(self.font_func())
+    _shared_vec_render:set(AC_RENDER_W, 50) ; s:SetWndSize(_shared_vec_render)
+    s:SetTextComplexMode(true)
+    _shared_vec_render:set(-1000, -1000) ; s:SetWndPos(_shared_vec_render)
+
+    local w = self.xml:InitTextWnd("companion_list:slot:distance", self)
+    w:SetFont(self.font_func())
+    _shared_vec_render:set(AC_RENDER_W, 50) ; w:SetWndSize(_shared_vec_render)
+    w:SetTextComplexMode(true)
+    _shared_vec_render:set(-1000, -1000) ; w:SetWndPos(_shared_vec_render)
+
+    return { text = w, shadow = s }
+end
+
+-- resolve alignment + base x/y for the current render_position (1024x768 virtual space).
+-- CGameFont alignment enum: alLeft=0, alRight=1, alCenter=2.
+-- Near-cursor (4-7) positions are relative to the crosshair / screen center (512,384),
+-- offset by render_cursor_gap. AC_CURSOR_VPAD nudges the text so it sits clear of center.
+local AC_CURSOR_CX = 512
+local AC_CURSOR_CY = 384
+local AC_CURSOR_VPAD = 24
+local function ac_render_layout()
+    local p = render_position or 3
+    local gap = render_cursor_gap or 80
+    local cx_left = (1024 - AC_RENDER_W) / 2  -- x for a centered full-width line
+    if p == 0 then     -- top-left
+        return 0, 20, 40
+    elseif p == 1 then -- top-right
+        return 1, 1024 - 20 - AC_RENDER_W, 40
+    elseif p == 2 then -- center
+        return 2, cx_left, 300
+    elseif p == 3 then -- bottom-center
+        return 2, cx_left, 600
+    elseif p == 4 then -- near cursor, left  (right-aligned, ends gap px left of center)
+        return 1, (AC_CURSOR_CX - gap) - AC_RENDER_W, AC_CURSOR_CY - 12
+    elseif p == 5 then -- near cursor, top   (centered, sits gap px above center)
+        return 2, cx_left, AC_CURSOR_CY - gap - AC_CURSOR_VPAD
+    elseif p == 6 then -- near cursor, right (left-aligned, starts gap px right of center)
+        return 0, AC_CURSOR_CX + gap, AC_CURSOR_CY - 12
+    elseif p == 7 then -- near cursor, bottom (centered, sits gap px below center)
+        return 2, cx_left, AC_CURSOR_CY + gap
+    end
+    return 2, cx_left, 600
+end
+
+-- place a {text, shadow} line at (x, y) with given alignment and color tag
+function ac_msg_overlay:place_line(line, str, ctag, align, x, y)
+    line.text:SetTextAlignment(align)
+    line.shadow:SetTextAlignment(align)
+    local fg = ctag .. str
+    line.text:SetText(fg)
+    -- shadow = same string, every color tag forced to black (alpha + length preserved),
+    -- so it stays a solid-black silhouette AND keeps identical width for alignment.
+    line.shadow:SetText(ac_blacken_tags(fg))
+    _shared_vec_render:set(x, y)         ; line.text:SetWndPos(_shared_vec_render)
+    _shared_vec_render:set(x + 1, y + 1) ; line.shadow:SetWndPos(_shared_vec_render)
+end
+
+function ac_msg_overlay:hide_line(line)
+    _shared_vec_render:set(-1000, -1000)
+    line.text:SetWndPos(_shared_vec_render)
+    line.shadow:SetWndPos(_shared_vec_render)
+end
+
+-- configure a {text, shadow} line as a PLAIN single-color, left-aligned, auto-width
+-- control (no %c tags). SetTextColor governs the whole string, so the alignment width
+-- quirk that affects mid-string %c tags cannot apply. GetWidth() is valid afterwards.
+function ac_msg_overlay:set_plain(line, str, clr)
+    line.text:SetTextComplexMode(false)
+    line.shadow:SetTextComplexMode(false)
+    line.text:SetTextAlignment(0)        -- alLeft: measure/position from the left edge
+    line.shadow:SetTextAlignment(0)
+    line.text:SetText(str)
+    line.shadow:SetText(str)
+    line.text:SetTextColor(clr)
+    line.shadow:SetTextColor(AC_SHADOW_ARGB)
+    line.text:AdjustWidthToText()        -- shrink WndSize to content so GetWidth() is exact
+    line.shadow:AdjustWidthToText()
+end
+
+-- place a plain line's left edge at (x, y) with the +1,+1 shadow
+function ac_msg_overlay:place_plain(line, x, y)
+    _shared_vec_render:set(x, y)         ; line.text:SetWndPos(_shared_vec_render)
+    _shared_vec_render:set(x + 1, y + 1) ; line.shadow:SetWndPos(_shared_vec_render)
+end
+
+-- Combined mode: main text (level color) + ammo tag (ammo-type color) on ONE line,
+-- as two side-by-side single-color controls. Measured and laid out as a group so it
+-- honors the render position/alignment without any mid-string %c gap.
+local AC_COMBINED_GAP = 6  -- px between main text and tag (1024x768 virtual space)
+function ac_msg_overlay:show_combined(main_str, main_clr, tag_str, tag_clr, duration)
+    if not main_str or main_str == "" then return end
+    local align, x, y1 = ac_render_layout()
+
+    self:set_plain(self.l1main, main_str, main_clr or clr06_White)
+    self:set_plain(self.l1tag,  tag_str,  tag_clr or clr06_White)
+    local main_w = self.l1main.text:GetWidth()
+    local tag_w  = self.l1tag.text:GetWidth()
+    local total_w = main_w + AC_COMBINED_GAP + tag_w
+
+    local group_left
+    if align == 2 then        -- center: group centered on the box midpoint
+        group_left = (x + AC_RENDER_W / 2) - total_w / 2
+    elseif align == 1 then    -- right: group right edge at the box right edge
+        group_left = (x + AC_RENDER_W) - total_w
+    else                      -- left: group starts at the box left edge
+        group_left = x
+    end
+
+    self:place_plain(self.l1main, group_left, y1)
+    self:place_plain(self.l1tag,  group_left + main_w + AC_COMBINED_GAP, y1)
+
+    -- combined uses its own controls; clear the %c single-line controls
+    self:hide_line(self.l1)
+    self:hide_line(self.l2)
+
+    self.visible_until = time_global() + math_floor((duration or 2) * 1000)
+    if not self.added then
+        local hud = get_hud()
+        if hud then
+            hud:AddDialogToRender(self)
+            self.added = true
+        end
+    end
+    if not self.registered then
+        RegisterScriptCallback("actor_on_update", self)
+        self.registered = true
+    end
+end
+
+function ac_msg_overlay:show(message, clr, line2, line2_clr, duration)
+    if not message or message == "" then return end
+    local align, x, y1 = ac_render_layout()
+
+    self:place_line(self.l1, message, argb_to_tag(clr), align, x, y1)
+
+    if line2 and line2 ~= "" then
+        self:place_line(self.l2, line2, argb_to_tag(line2_clr or clr), align, x, y1 + AC_LINE_SPACING)
+    else
+        self:hide_line(self.l2)
+    end
+
+    -- not in combined mode: clear its dedicated controls
+    self:hide_line(self.l1main)
+    self:hide_line(self.l1tag)
+
+    self.visible_until = time_global() + math_floor((duration or 2) * 1000)
+
+    if not self.added then
+        local hud = get_hud()
+        if hud then
+            hud:AddDialogToRender(self)
+            self.added = true
+        end
+    end
+    if not self.registered then
+        RegisterScriptCallback("actor_on_update", self)
+        self.registered = true
+    end
+end
+
+function ac_msg_overlay:hide()
+    self:hide_line(self.l1)
+    self:hide_line(self.l2)
+    self:hide_line(self.l1main)
+    self:hide_line(self.l1tag)
+    self.visible_until = 0
+    if self.added then
+        local hud = get_hud()
+        if hud then hud:RemoveDialogToRender(self) end
+        self.added = false
+    end
+    if self.registered then
+        UnregisterScriptCallback("actor_on_update", self)
+        self.registered = false
+    end
+end
+
+-- self-expire: hide when the display duration elapses (callback object form)
+function ac_msg_overlay:actor_on_update()
+    if self.visible_until > 0 and time_global() >= self.visible_until then
+        self:hide()
+    end
+end
+
+-- lazily create the singleton overlay (after a font/position change it is dropped and rebuilt)
+local function get_ac_overlay()
+    if not ac_overlay then
+        ac_overlay = ac_msg_overlay()
+    end
+    return ac_overlay
+end
+
+-- drop the overlay so the next show() rebuilds it with current font settings
+local function reset_ac_overlay()
+    if ac_overlay then
+        ac_overlay:hide()
+        ac_overlay = nil
+    end
 end
 
 -- ammo type classification
@@ -664,12 +988,20 @@ local function format_ammo_type_string(display_round, tag_round)
     end
     
     -- determine what to show and how to highlight
+    --   mode 2 (separate): ammo name on line 1, tag on line 2
+    --   mode 3 (combined): whole ammo chunk returned via separate_tag (the colored part);
+    --                      main line stays clean so it keeps the ammo-level color
+    --   mode 0/1 (none/whole): everything appended on one line (result)
     if show_ammo_tag and tag then
         -- tag is enabled - highlight applies to tag
         if highlight_ammo_mode == 2 then
             -- separate lines: ammo name on line 1, tag on line 2
             result = ammo_name_display or ""
             separate_tag = tag
+        elseif highlight_ammo_mode == 3 then
+            -- combined: full chunk (name + tag) carried as the colored part
+            result = ""
+            separate_tag = ammo_name_display and (ammo_name_display .. " " .. tag) or tag
         else
             -- none or whole: everything on one line
             if ammo_name_display then
@@ -680,8 +1012,8 @@ local function format_ammo_type_string(display_round, tag_round)
         end
     elseif show_ammo_type and ammo_name_display then
         -- tag disabled but ammo type enabled - highlight applies to ammo type name
-        if highlight_ammo_mode == 2 then
-            -- separate lines
+        if highlight_ammo_mode == 2 or highlight_ammo_mode == 3 then
+            -- separate lines / combined: name is the colored part
             result = ""
             separate_tag = ammo_name_display
         else
@@ -736,30 +1068,35 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
     local clr = nil
     local ammo_type = nil
     local separate_tag = nil
-    
+    local msg_key = nil  -- st_ac_* id chosen by the active branch; used by minimalist bar override
+    local display_round = nil  -- ammo section for type-name display (function-scoped so the minimalist override can reuse it)
+    local tag_round = nil      -- ammo section for tag classification
+
     local mag_data = get_mag_loaded(weaponId)
     local is_supported = is_supported_weapon(sec)
     
     -- determine weapon status and message
     if is_jammed_weapon(weapon) then
         message = get_translation("st_ac_jammed")
+        msg_key = "st_ac_jammed"
         clr = use_clr and clr00_Red or clr06_White
-        
+
     elseif in_grenade_mode then
         message = currentAmmo == 1 and get_translation("st_ac_grenade") or get_translation("st_ac_empty")
+        msg_key = currentAmmo == 1 and "st_ac_grenade" or "st_ac_empty"
         clr = use_clr and (currentAmmo == 1 and clr06_White or clr00_Red) or clr06_White
-        
+
     elseif currentAmmo == 0 then
         if is_supported and not mag_data then
             message = get_translation("st_ac_noMag")
+            msg_key = "st_ac_noMag"
         else
             message = get_translation("st_ac_empty")
+            msg_key = "st_ac_empty"
         end
         clr = use_clr and clr00_Red or clr06_White
         
     else
-        local display_round = nil  -- For ammo type name
-        local tag_round = nil      -- For ammo tag
         local max_ammo = 0
         local base_mag_size = SYS_GetParam(2, sec, "ammo_mag_size", 0)
         local is_chamber_only = false  -- Track if only chambered round remains
@@ -815,22 +1152,27 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
 
         if currentAmmo == max_ammo + 1 then
             message, ammo_type, separate_tag = format_ammo_message("st_ac_plus1", currentAmmo, max_ammo, display_round, tag_round)
+            msg_key = "st_ac_plus1"
             clr = use_clr and clr06_White or clr06_White
-            
+
         elseif curAmmoPerc > 1 then
             message, ammo_type, separate_tag = format_ammo_message("st_ac_overfull", currentAmmo, max_ammo, display_round, tag_round)
+            msg_key = "st_ac_overfull"
             clr = use_clr and clrEE_Purple or clr06_White
-            
+
         elseif currentAmmo == 1 and base_mag_size == 2 then
             message, ammo_type, separate_tag = format_ammo_message("st_ac_just_one", currentAmmo, max_ammo, display_round, tag_round)
+            msg_key = "st_ac_just_one"
             clr = use_clr and clr03_Amber or clr06_White
-            
+
         elseif is_chamber_only then
             -- Chamber only - don't show ammo type/tag
             if has_empty_mag then
                 message = get_translation("st_ac_empty_mag_oitc")
+                msg_key = "st_ac_empty_mag_oitc"
             else
                 message = get_translation("st_ac_no_mag_oitc")
+                msg_key = "st_ac_no_mag_oitc"
             end
             clr = use_clr and clr00_Red or clr06_White
             
@@ -844,14 +1186,17 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
                 idx = clamp(math_ceil(curAmmoPerc * 10), 1, #messages - 1)
             end
             print_dbg("Ammo index: %s (%.1f%%, %d/%d)", idx, curAmmoPerc * 100, currentAmmo, max_ammo)
-            
+
             message, ammo_type, separate_tag = format_ammo_message(messages[idx].m, currentAmmo, max_ammo, display_round, tag_round)
+            msg_key = messages[idx].m
             clr = use_clr and messages[idx].c or clr06_White
             print_dbg("Color: use_clr=%s, idx=%s, clr=%s", tostring(use_clr), idx, tostring(clr))
         end
-        
-        -- apply ammo type color based on highlight mode
-        -- only apply when Colored Messages is enabled
+
+        -- apply ammo type color based on highlight mode (Whole Message).
+        -- Only when Colored Messages is enabled. Applies in minimalist bar mode too:
+        -- the whole bar takes the ammo-type color (use "Combined" to keep the level color
+        -- and color only the type/tag).
         if use_clr and ammo_type and highlight_ammo_mode == 1 then
             local ammo_clr = get_ammo_type_color(ammo_type)
             print_dbg("Highlight override: mode=%s, ammo_type=%s, ammo_clr=%s", highlight_ammo_mode, ammo_type, tostring(ammo_clr))
@@ -860,7 +1205,43 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
             end
         end
     end
-    
+
+    -- minimalist bar override: replace descriptive/numeric text with the block bar.
+    -- Runs last so it covers every branch (jammed, grenade, chamber-only, level, etc.).
+    -- Keeps the ammo-level color already chosen above for the bar itself.
+    if minimalist_bar and msg_key then
+        local bar = MIN_BAR[msg_key]
+        if bar then
+            message = bar
+            ammo_type = nil
+            separate_tag = nil
+
+            -- optionally show ammo type/tag next to the bar (when those MCM options are on
+            -- and we actually have a round to classify; chamber-only/jammed/empty have none).
+            -- format_ammo_type_string already honors show_ammo_type / show_ammo_tag /
+            -- highlight_ammo_mode, so mode 2 still splits the tag onto the second line.
+            if (show_ammo_type or show_ammo_tag) and (display_round or tag_round) then
+                local ammo_str, atype, sep_tag = format_ammo_type_string(display_round, tag_round)
+                ammo_type = atype
+                separate_tag = sep_tag
+                if highlight_ammo_mode == 2 then
+                    -- Separate Lines + bar: keep the bar ALONE on line 1 and put the whole
+                    -- ammo chunk (name + tag) together on line 2. format_ammo_type_string
+                    -- splits the name (ammo_str) from the tag (sep_tag) for the normal text
+                    -- path, so recombine them here instead of hanging the name off the bar.
+                    if ammo_str and ammo_str ~= "" and sep_tag and sep_tag ~= "" then
+                        separate_tag = ammo_str .. " " .. sep_tag
+                    elseif ammo_str and ammo_str ~= "" then
+                        separate_tag = ammo_str
+                    end
+                    -- message stays as the bar; separate_tag (above) feeds line 2
+                elseif ammo_str and ammo_str ~= "" then
+                    message = bar .. " " .. ammo_str
+                end
+            end
+        end
+    end
+
     return message, clr, ammo_type, separate_tag
 end
 
@@ -871,20 +1252,41 @@ local function display_ammo_status(message, clr, ammo_type, separate_tag)
     -- All other paths (fake reload, lower, hide/show, auto-check after reload) keep the flag false,
     -- so they still show the message.
     if hide_msg_on_inspect and ac_pending_inspect_anim_playing then return end
-    display_message(message, clr)
 
-    -- display separate tag line if mode 2
-    if highlight_ammo_mode == 2 and separate_tag then
-        local tag_clr = use_clr and get_ammo_type_color(ammo_type) or clr06_White
-        actor_menu.set_msg(2, separate_tag, msg_duration, tag_clr)
+    local tag_clr = use_clr and get_ammo_type_color(ammo_type) or clr06_White
+    local base_clr = clr or clr06_White
+
+    if custom_render then
+        -- Combined (3): single line, two-tone (level-color text + ammo-color tag), drawn as
+        -- two side-by-side single-color controls (show_combined). One %c string is NOT used
+        -- because center/right alignment counts a mid-string %c tag's literal chars as render
+        -- width and opens a large gap
+        if highlight_ammo_mode == 3 and separate_tag and separate_tag ~= "" then
+            get_ac_overlay():show_combined(message, base_clr, separate_tag, tag_clr, msg_duration)
+        else
+            -- Separate (2): ammo tag on a colored 2nd line. None/Whole: no 2nd line
+            local line2 = (highlight_ammo_mode == 2) and separate_tag or nil
+            get_ac_overlay():show(message, base_clr, line2, tag_clr, msg_duration)
+        end
+    else
+        -- actor_menu's message line has no complex mode (base set_msg = SetTextST + one
+        -- SetTextColor), so it can't color part of a line. Both Combined (3) and Separate (2)
+        -- therefore put the colored ammo tag on a 2nd line (matches the MCM "on a second line
+        -- otherwise" note); merging it inline would force the whole line to the level color
+        -- (e.g. all-white for "Full + 1"). None/Whole already merged the tag into message
+        display_message(message, clr)
+        local line2 = (highlight_ammo_mode == 2 or highlight_ammo_mode == 3) and separate_tag or nil
+        if line2 and line2 ~= "" then
+            actor_menu.set_msg(2, line2, msg_duration, tag_clr)
+        end
     end
 
-    -- Arm cooldown: further presses of the ammo check key are ignored until this message fades.
-    -- Track the weapon the message is about so a weapon switch can clear it early.
-    ac_cooldown_until = time_global() + math_floor(msg_duration * 1000)
-    local _a = db.actor
-    local _w = _a and _a:active_item()
-    ac_last_weapon_id = (_w and IsWeapon(_w)) and _w:id() or 0
+    -- Track when the message visually disappears. If the next ammo-check key press lands
+    -- after the cooldown has expired but before this time, the stale message is hidden.
+    -- Note: ac_cooldown_until and ac_last_weapon_id are set in check_Ammo at commit time
+    -- (using the weapon the check was about, not the actor's currently active weapon),
+    -- so they are not overwritten here
+    ac_message_until = time_global() + math_floor(msg_duration * 1000)
 end
 
 -- auto-check after reload
@@ -1218,20 +1620,53 @@ function on_mcm_load()
             { id = "hide_msg_on_inspect", type = "check", val = 1, def = false },
             { id = "usecolor", type = "check", val = 1, def = true },
             { id = "color_intensity", type = "track", val = 2, min = 30, max = 100, step = 10, def = 70 },
-            { id = "display_mode", type = "list", val = 2, def = 0, 
-                content = { 
-                    { 0, "dm_text" }, 
-                    { 1, "dm_numeric" }, 
-                    { 2, "dm_both" } 
-                } 
+            { id = "display_mode", type = "list", val = 2, def = 0,
+                content = {
+                    { 0, "dm_text" },
+                    { 1, "dm_numeric" },
+                    { 2, "dm_both" }
+                }
             },
+            { id = "minimalist_bar", type = "check", val = 1, def = false },
+            { id = "custom_render", type = "check", val = 1, def = true },
+            { id = "render_font_family", type = "list", val = 2, def = 0,
+                content = {
+                    { 0, "ff_graffiti" },
+                    { 1, "ff_letterica" },
+                    { 2, "ff_system" },
+                    { 3, "ff_letterica_pure" }
+                }
+            },
+            { id = "render_font_size", type = "list", val = 2, def = 3,
+                content = {
+                    { 1, "fs_small" },
+                    { 2, "fs_medium" },
+                    { 3, "fs_large" },
+                    { 5, "fs_large_plus" },
+                    { 4, "fs_xlarge" }
+                }
+            },
+            { id = "render_position", type = "list", val = 2, def = 3,
+                content = {
+                    { 0, "rp_tl" },
+                    { 1, "rp_tr" },
+                    { 2, "rp_center" },
+                    { 3, "rp_bottom" },
+                    { 4, "rp_cursor_left" },
+                    { 5, "rp_cursor_top" },
+                    { 6, "rp_cursor_right" },
+                    { 7, "rp_cursor_bottom" }
+                }
+            },
+            { id = "render_cursor_gap", type = "track", val = 2, min = 0, max = 300, step = 10, def = 80 },
             { id = "show_ammo_type", type = "check", val = 1, def = false },
             { id = "show_ammo_tag", type = "check", val = 1, def = true },
             { id = "highlight_ammo_mode", type = "list", val = 2, def = 0,
                 content = {
                     { 0, "ham_none" },
                     { 1, "ham_whole" },
-                    { 2, "ham_separate" }
+                    { 2, "ham_separate" },
+                    { 3, "ham_combined" }
                 }
             },
             { id = "msg_duration", type = "track", val = 2, min = 1, max = 5, step = 0.5, def = 2 },
@@ -1332,6 +1767,15 @@ function on_option_change()
         update_colors() -- apply color intensity changes
         print_dbg("Settings loaded: use_clr=%s (raw=%s), color_intensity=%s", tostring(use_clr), tostring(clr_val), tostring(color_intensity))
         display_mode = ui_mcm.get("rax_ammo_check/display_mode") or 0
+        local min_bar_val = ui_mcm.get("rax_ammo_check/minimalist_bar")
+        minimalist_bar = (min_bar_val == true or min_bar_val == 1)  -- default false
+        local custom_render_val = ui_mcm.get("rax_ammo_check/custom_render")
+        custom_render = (custom_render_val == true or custom_render_val == 1 or custom_render_val == nil)  -- default true
+        render_font_family = ui_mcm.get("rax_ammo_check/render_font_family") or 0
+        render_font_size = ui_mcm.get("rax_ammo_check/render_font_size") or 3
+        render_position = ui_mcm.get("rax_ammo_check/render_position") or 3
+        render_cursor_gap = ui_mcm.get("rax_ammo_check/render_cursor_gap") or 80
+        reset_ac_overlay()  -- rebuild on next show with current font/position settings
         show_ammo_type = ui_mcm.get("rax_ammo_check/show_ammo_type")
         if show_ammo_type == nil then show_ammo_type = true end
         show_ammo_tag = ui_mcm.get("rax_ammo_check/show_ammo_tag")
@@ -1725,18 +2169,30 @@ function check_ammo_after_reload()
     
     -- display with "Loaded" prefix
     if message and show_message then
-        local loaded_msg = game.translate_string("st_ac_loaded") .. " " .. message
-        if show_ammo_type and ammo_type then
-            if separate_tag then
-                loaded_msg = loaded_msg .. " " .. ammo_type
-            else
-                loaded_msg = ammo_type .. " " .. loaded_msg
+        local loaded_msg
+        if minimalist_bar then
+            -- bar mode: show the bar alone, no "Loaded" prefix / ammo type
+            loaded_msg = message
+        else
+            loaded_msg = game.translate_string("st_ac_loaded") .. " " .. message
+            if show_ammo_type and ammo_type then
+                if separate_tag then
+                    loaded_msg = loaded_msg .. " " .. ammo_type
+                else
+                    loaded_msg = ammo_type .. " " .. loaded_msg
+                end
             end
         end
-        actor_menu.set_msg(1, loaded_msg, msg_duration, use_clr and clr or nil)
-        -- Arm cooldown so the ammo check key is ignored while this "Loaded" message shows.
-        ac_cooldown_until = time_global() + math_floor(msg_duration * 1000)
+        if custom_render then
+            get_ac_overlay():show(loaded_msg, (use_clr and clr) or clr06_White, nil, nil, msg_duration)
+        else
+            actor_menu.set_msg(1, loaded_msg, msg_duration, use_clr and clr or nil)
+        end
+        -- Arm cooldown (3s fixed) and track when the message visually expires.
+        local _now = time_global()
+        ac_cooldown_until = _now + AC_COOLDOWN_MS
         ac_last_weapon_id = weaponId
+        ac_message_until = _now + math_floor(msg_duration * 1000)
     end
     
     return true
@@ -1820,35 +2276,36 @@ function check_Ammo(skip_animation)
     if not IsWeapon(weapon) then return end
     if IsItem("fake_ammo_wpn", nil, weapon) then return end
 
-    -- Cooldown handling: while a previous ammo-check is in flight (animation playing or
-    -- message on screen), ignore new key presses for the SAME weapon. If the player switched
-    -- weapons, reset and continue.
-    -- The cooldown is set in two places:
-    --   1. Right here (immediately, 5s guard) the moment check_Ammo commits to running.
-    --      This blocks spam during the animation/delay window BEFORE the message displays.
-    --   2. Inside display_ammo_status / check_ammo_after_reload, refined to the precise
-    --      message-fade time (time_global() + msg_duration).
-    -- The "defer until weapon idle" recursion clears the cooldown before re-calling check_Ammo
-    -- so it isn't blocked by its own first arming.
-    if ac_cooldown_until > 0 and time_global() < ac_cooldown_until then
+    -- Cooldown handling:
+    --   - Same weapon, still in cooldown -> ignore key.
+    --   - Different weapon, still in cooldown -> hide stale message, reset, proceed.
+    --   - Cooldown expired but the previous message is still visually on screen (because
+    --     msg_duration is longer than the cooldown window) -> hide it first, then proceed.
+    -- The "defer until weapon idle" recursion clears the cooldown before re-calling
+    -- check_Ammo so it isn't blocked by its own first arming.
+    local now = time_global()
+    if ac_cooldown_until > 0 and now < ac_cooldown_until then
         if weapon:id() == ac_last_weapon_id then
-            print_dbg("Ammo check key ignored - previous check still in flight (same weapon).")
+            print_dbg("Ammo check key ignored - previous check still in cooldown (same weapon).")
             return
         end
-        -- Different weapon: clear the stale text immediately and reset cooldown, then fall
-        -- through to the normal check_Ammo flow.
         print_dbg("Ammo check: weapon changed (was id=%s, now id=%s) - clearing stale message.", tostring(ac_last_weapon_id), tostring(weapon:id()))
-        ac_cooldown_until = 0
-        ac_last_weapon_id = 0
         actor_menu.set_msg(1, "", 0)
         actor_menu.set_msg(2, "", 0)
+        if ac_overlay then ac_overlay:hide() end
+    elseif ac_message_until > 0 and now < ac_message_until then
+        -- Cooldown over, but the previous message is still visible. Hide it first.
+        print_dbg("Ammo check: cooldown expired but stale message still on screen - hiding it.")
+        actor_menu.set_msg(1, "", 0)
+        actor_menu.set_msg(2, "", 0)
+        if ac_overlay then ac_overlay:hide() end
     end
 
-    -- Arm initial 5-second guard cooldown so spamming the key during the animation/delay
-    -- window before the message displays doesn't trigger another check_Ammo. The precise
-    -- value will be overwritten by display_ammo_status when the message actually appears.
-    ac_cooldown_until = time_global() + 5000
+    -- Arm cooldown for this check. Fixed window regardless of msg_duration so the player
+    -- can re-trigger quickly; the message may visually outlive the cooldown
+    ac_cooldown_until = now + AC_COOLDOWN_MS
     ac_last_weapon_id = weapon:id()
+    ac_message_until = 0  -- reset; will be set by display_ammo_status when the new message displays
 
     local weaponId = weapon:id()
     local sec = weapon:section()
