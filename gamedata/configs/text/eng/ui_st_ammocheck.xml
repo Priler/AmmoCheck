@@ -416,4 +416,69 @@
     <string id="ui_mcm_rax_ammo_check_debug_mode_desc">
         <text>Enable debug mode for animation testing. When ON: Numpad 0-9 tests weapon states, Numpad * lists weapon animations. Use to discover which state triggers bolt cycling.</text>
     </string>
+
+    <!-- ### One Key Weapon Controls (optional feature) -->
+    <string id="ui_mcm_menu_rax_ammo_check_onekey">
+        <text>Ammo Check - One Key</text>
+    </string>
+    <string id="ui_mm_title_rax_ammo_check_onekey">
+        <text>One Key Weapon Controls</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_desc">
+        <text>Multiplex a single key into several weapon actions: tap to reload, tap + modifier to unjam, double-tap to switch ammo type, hold to check ammo. Magazine actions use Anomaly Magazines Redux when installed, otherwise they fall back to the engine reload.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_enable">
+        <text>Enable One Key Controls</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_enable_desc">
+        <text>Master switch for this feature. OFF by default so the Reload key behaves normally. Turn ON to route reload, unjam, ammo switch and ammo check through one key.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_key_reload">
+        <text>Action Key</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_key_reload_desc">
+        <text>The key that drives all One Key actions. Must NOT be the same key as your vanilla Reload control, or the engine will also reload on every press. Recommended setup: rebind vanilla Reload to a free key, then set this to your old Reload key (R).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_reload_key_unjams">
+        <text>Tap Unjams a Jammed Weapon</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_reload_key_unjams_desc">
+        <text>When ON, a plain tap on a jammed weapon unjams it instead of reloading (no modifier needed). When the weapon is not jammed the tap reloads as usual. Requires Weapon Parts Overhaul (arti_jamming).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_focuses_pda">
+        <text>Action Key Raises/Lowers PDA</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_focuses_pda_desc">
+        <text>When ON, pressing the Action Key while the PDA is in hand raises or lowers the PDA, so the same key toggles the device.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_doubletap_behavior">
+        <text>Double-Tap Action</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_doubletap_behavior_desc">
+        <text>What a double-tap does. Situational: ammo wheel when 3+ types are available, swap to next when exactly 2, reload when fewer. Next Ammo Type: cycle to the next available type. Ammo Wheel: always open the wheel. Reload: just reload.</text>
+    </string>
+    <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_none">
+        <text>None (Disabled)</text>
+    </string>
+    <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_reload">
+        <text>Reload</text>
+    </string>
+    <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_next">
+        <text>Next Ammo Type</text>
+    </string>
+    <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_wheel">
+        <text>Ammo Wheel</text>
+    </string>
+    <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_situational">
+        <text>Situational</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_check_ammo_after_reload">
+        <text>Check Ammo After Reload</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_check_ammo_after_reload_desc">
+        <text>Automatically run an ammo check right after a One Key reload or ammo switch completes.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_update_mcm">
+        <text>Update MCM to 1.6.0 or newer to rebind the action key here. Key defaults to R.</text>
+    </string>
 </string_table>

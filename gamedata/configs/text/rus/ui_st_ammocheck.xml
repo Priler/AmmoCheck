@@ -411,4 +411,70 @@
     <string id="ui_mcm_rax_ammo_check_debug_mode_desc">
         <text>Режим тестирования анимаций. Numpad 0-9 - состояния оружия, Numpad * - список анимаций, +/- - задержка затвора.</text>
     </string>
+
+    <!-- ### One Key Weapon Controls (optional feature) -->
+    <string id="ui_mcm_menu_rax_ammo_check_onekey">
+        <text>Проверка боезапаса - Одна клавиша</text>
+    </string>
+    <string id="ui_mm_title_rax_ammo_check_onekey">
+        <text>Управление оружием одной клавишей</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_desc">
+        <text>Назначить на одну клавишу несколько действий с оружием: нажатие - перезарядка, нажатие с модификатором - устранение задержки, двойное нажатие - смена типа патронов, удержание - проверка боезапаса. Для действий с магазинами используется Anomaly Magazines Redux, если установлен, иначе штатная перезарядка.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_enable">
+        <text>Включить управление одной клавишей</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_enable_desc">
+        <text>Главный переключатель. По умолчанию ВЫКЛ, клавиша Перезарядки работает как обычно. Включите, чтобы объединить перезарядку, устранение задержки, смену патронов и проверку боезапаса на одной клавише.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_key_reload">
+        <text>Клавиша действия</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_key_reload_desc">
+        <text>Клавиша всех действий One Key. НЕ должна совпадать с штатной клавишей Перезарядки, иначе движок будет дополнительно перезаряжать при каждом нажатии. Рекомендация: переназначьте штатную Перезарядку на свободную клавишу, затем задайте здесь свою прежнюю клавишу Перезарядки (R).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_reload_key_unjams">
+        <text>Нажатие устраняет задержку</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_reload_key_unjams_desc">
+        <text>Если включено, обычное нажатие на заклинившем оружии устраняет задержку вместо перезарядки (без модификатора). Если оружие не заклинило, нажатие перезаряжает как обычно. Требует Weapon Parts Overhaul (arti_jamming).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_focuses_pda">
+        <text>Клавиша действия поднимает/опускает КПК</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_focuses_pda_desc">
+        <text>Если включено, нажатие клавиши действия, когда в руках КПК, поднимает или опускает его, и та же клавиша переключает устройство.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_doubletap_behavior">
+        <text>Действие по двойному нажатию</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_doubletap_behavior_desc">
+        <text>Что делает двойное нажатие. Ситуативно: колесо патронов при 3+ типах, переключение на следующий при 2, перезарядка при меньшем количестве. Следующий тип: переключить на следующий доступный тип. Колесо патронов: всегда открывать колесо. Перезарядка: просто перезарядка.</text>
+    </string>
+    <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_none">
+        <text>Отключено</text>
+    </string>
+    <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_reload">
+        <text>Перезарядка</text>
+    </string>
+    <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_next">
+        <text>Следующий тип патронов</text>
+    </string>
+    <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_wheel">
+        <text>Колесо патронов</text>
+    </string>
+    <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_situational">
+        <text>Ситуативно</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_check_ammo_after_reload">
+        <text>Проверять боезапас после перезарядки</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_check_ammo_after_reload_desc">
+        <text>Автоматически проверять боезапас сразу после перезарядки или смены патронов одной клавишей.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_update_mcm">
+        <text>Обновите MCM до 1.6.0 или новее, чтобы переназначить клавишу здесь. По умолчанию R.</text>
+    </string>
+
 </string_table>

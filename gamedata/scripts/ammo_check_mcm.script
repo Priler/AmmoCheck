@@ -1735,10 +1735,35 @@ function on_mcm_load()
             { id = "mode", type = ui_mcm.kb_mod_radio, val = 2, def = 2, hint = "mcm_kb_mode", 
                 content = { { 0, "mcm_kb_mode_press" }, { 1, "mcm_kb_mode_dtap" }, { 2, "mcm_kb_mode_hold" } } 
             },
-            { id = "desc_mcm", type = "desc", text = "ui_mcm_rax_ammo_check_update_mcm", clr = { 255, 175, 0, 0 }, 
-                precondition = { function() return not mcm_keybinds end } 
+            { id = "desc_mcm", type = "desc", text = "ui_mcm_rax_ammo_check_update_mcm", clr = { 255, 175, 0, 0 },
+                precondition = { function() return not mcm_keybinds end }
             },
-            
+
+            -- one key weapon controls (logic lives in ammo_check_onekey_mcm.script)
+            { id = "divider_onekey", type = "line" },
+            { id = "title_onekey", type = "title", text = "ui_mm_title_rax_ammo_check_onekey" },
+            { id = "onekey_desc", type = "desc", text = "ui_mcm_rax_ammo_check_onekey_desc" },
+            { id = "onekey_enable", type = "check", val = 1, def = false },
+            { id = "onekey_key_reload", type = "key_bind", val = 2, def = DIK_keys.DIK_R },
+            { id = "onekey_reload_key_unjams", type = "check", val = 1, def = false },
+            { id = "onekey_focuses_pda", type = "check", val = 1, def = false },
+            { id = "onekey_modifier_unjam", type = ui_mcm.kb_mod_radio, val = 2, def = 2, hint = "mcm_kb_modifier",
+                content = { { 1, "mcm_kb_mod_shift" }, { 2, "mcm_kb_mod_ctrl" }, { 3, "mcm_kb_mod_alt" } }
+            },
+            { id = "onekey_doubletap_behavior", type = "list", val = 0, def = "situational",
+                content = {
+                    { "none", "dt_none" },
+                    { "reload", "dt_reload" },
+                    { "next_ammo_type", "dt_next" },
+                    { "ammo_wheel", "dt_wheel" },
+                    { "situational", "dt_situational" }
+                }
+            },
+            { id = "onekey_check_ammo_after_reload", type = "check", val = 1, def = false },
+            { id = "onekey_desc_update_mcm", type = "desc", text = "ui_mcm_rax_ammo_check_onekey_update_mcm", clr = { 255, 175, 0, 0 },
+                precondition = { function() return not mcm_keybinds end }
+            },
+
             -- debug
             { id = "divider_debug", type = "line" },
             { id = "title_debug", type = "title", text = "ui_mcm_rax_ammo_check_title_debug" },
