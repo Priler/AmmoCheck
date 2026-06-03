@@ -15,14 +15,15 @@ local enabled                 = false
 local mcm_key_reload          = DIK_keys.DIK_R
 local mcm_modifier_unjam      = 2          -- 1 shift, 2 ctrl, 3 alt
 local mcm_doubletap_behavior  = "situational"
-local mcm_check_after_reload  = false
 local mcm_reload_key_unjams   = false      -- plain tap unjams a jammed weapon (no modifier)
 local mcm_focuses_pda         = false      -- tap raises/lowers the PDA when it is in hand
+local mcm_hold_ms             = 200        -- hold this long (ms) to trigger ammo check instead of reload
+local mcm_double_ms           = 200        -- second tap within this window (ms) counts as a double-tap, also the reload defer
 
 -- key_bind only resolves on MCM 1.6.0+; guard reads with the defaults above.
 local mcm_keybinds = ui_mcm and ui_mcm.key_hold
 
-local OKR_DEBUG = true  -- set true to print key/reload tracing to xray log, entries are "[AC-OKR]"
+local OKR_DEBUG = false  -- set true to print key/reload tracing to xray log, entries are "[AC-OKR]"
 
 local function ammo_now()
     local w = db.actor and db.actor:active_item()
@@ -85,20 +86,20 @@ end
 function on_option_change()
     if not ui_mcm then return end
 
-    local en = ui_mcm.get("rax_ammo_check/onekey_enable")
+    local en = ui_mcm.get("rax_ammo_check/onekey/enable")
     enabled = (en == true or en == 1)
 
     if mcm_keybinds then
-        mcm_key_reload = ui_mcm.get("rax_ammo_check/onekey_key_reload") or DIK_keys.DIK_R
+        mcm_key_reload = ui_mcm.get("rax_ammo_check/onekey/key_reload") or DIK_keys.DIK_R
     end
-    mcm_modifier_unjam = ui_mcm.get("rax_ammo_check/onekey_modifier_unjam") or 2
-    mcm_doubletap_behavior = ui_mcm.get("rax_ammo_check/onekey_doubletap_behavior") or "situational"
-    local chk = ui_mcm.get("rax_ammo_check/onekey_check_ammo_after_reload")
-    mcm_check_after_reload = (chk == true or chk == 1)
-    local unj = ui_mcm.get("rax_ammo_check/onekey_reload_key_unjams")
+    mcm_modifier_unjam = ui_mcm.get("rax_ammo_check/onekey/modifier_unjam") or 2
+    mcm_doubletap_behavior = ui_mcm.get("rax_ammo_check/onekey/doubletap_behavior") or "situational"
+    local unj = ui_mcm.get("rax_ammo_check/onekey/reload_key_unjams")
     mcm_reload_key_unjams = (unj == true or unj == 1)
-    local pda = ui_mcm.get("rax_ammo_check/onekey_focuses_pda")
+    local pda = ui_mcm.get("rax_ammo_check/onekey/focuses_pda")
     mcm_focuses_pda = (pda == true or pda == 1)
+    mcm_hold_ms = ui_mcm.get("rax_ammo_check/onekey/hold_ms") or 200
+    mcm_double_ms = ui_mcm.get("rax_ammo_check/onekey/doubletap_ms") or 200
 
     set_mags_handler_suppressed(enabled)
 end
@@ -120,11 +121,10 @@ end
 -- unreliable on on_before_key_press, firing the single-tap reload even on a hold. Instead we
 -- track the key ourselves:
 --   key down  : consume the press, record the time, detect a double-tap vs the previous press
---   key hold  : once held past OKR_HOLD_MS, fire the ammo check and cancel any pending reload
---   key up    : if it was a short tap, defer the reload/unjam by OKR_DOUBLE_MS so a quick second
+--   key hold  : once held past mcm_hold_ms, fire the ammo check and cancel any pending reload
+--   key up    : if it was a short tap, defer the reload/unjam by mcm_double_ms so a quick second
 --               tap can cancel it and run the ammo-type switch instead
-local OKR_HOLD_MS   = 250   -- hold this long (ms) to trigger ammo check instead of reload
-local OKR_DOUBLE_MS = 250   -- second tap within this window (ms) counts as a double-tap
+-- Both timings are MCM sliders (read in on_option_change), defaulting to 200 ms.
 
 local okr_down_t          = 0      -- time_global of the current press, 0 when idle
 local okr_hold_fired      = false  -- ammo check already fired for this hold
@@ -138,7 +138,8 @@ local okr_pending_unjam   = false  -- the pending single action is unjam (modifi
 -- own code). bind is only passed by on_before_key_press; resolve it from the dik otherwise.
 local function is_reload_key(key, bind)
     bind = bind or dik_to_bind(key)
-    return (bind == key_bindings.kWPN_RELOAD) or (key == mcm_key_reload)
+    -- mcm_key_reload set to DIK_ESCAPE means the extra key is unbound; match only the Reload bind
+    return (bind == key_bindings.kWPN_RELOAD) or (mcm_key_reload ~= DIK_keys.DIK_ESCAPE and key == mcm_key_reload)
 end
 
 local function okr_clear_pending()
@@ -166,7 +167,7 @@ local function do_doubletap_action(weapon)
     end
 end
 
--- deferred single-tap action: runs OKR_DOUBLE_MS after release unless a double-tap cancelled it
+-- deferred single-tap action: runs mcm_double_ms after release unless a double-tap cancelled it
 local function weapon_is_jammed(wpn)
     return wpn and arti_jamming and arti_jamming.get_jammed and arti_jamming.get_jammed(wpn:id()) and true or false
 end
@@ -230,7 +231,7 @@ function on_before_key_press(key, bind, dis, flags)
 
     -- second press inside the window: double-tap. Cancel the pending single, run the switch.
     -- skipped entirely when the double-tap action is "none"
-    if mcm_doubletap_behavior ~= "none" and okr_last_press_t > 0 and (now - okr_last_press_t) <= OKR_DOUBLE_MS then
+    if mcm_doubletap_behavior ~= "none" and okr_last_press_t > 0 and (now - okr_last_press_t) <= mcm_double_ms then
         okr_clear_pending()
         okr_last_press_t = 0
         okr_down_t = 0
@@ -249,7 +250,7 @@ end
 function on_key_hold(key)
     if not (enabled and ui_mcm) then return end
     if not is_reload_key(key) then return end
-    if okr_down_t > 0 and (not okr_hold_fired) and (time_global() - okr_down_t) >= OKR_HOLD_MS then
+    if okr_down_t > 0 and (not okr_hold_fired) and (time_global() - okr_down_t) >= mcm_hold_ms then
         okr_hold_fired = true
         okr_clear_pending()
         okr_last_press_t = 0
@@ -282,7 +283,7 @@ function on_key_release(key)
     if mcm_doubletap_behavior == "none" then
         okr_do_single_action()
     else
-        CreateTimeEvent("ac_okr_single", "reload", OKR_DOUBLE_MS / 1000, okr_do_single_action)
+        CreateTimeEvent("ac_okr_single", "reload", mcm_double_ms / 1000, okr_do_single_action)
     end
 end
 
@@ -313,14 +314,8 @@ function try_reload_weapon()
     else
         db.actor:reload_weapon()
     end
-
-    if mcm_check_after_reload then
-        -- non-magazined weapons that are already full will not reload, so skip the check
-        if (not mags_supported(weapon)) and (weapon:get_ammo_in_magazine() >= SYS_GetParam(2, weapon:section(), "ammo_mag_size")) then
-            return
-        end
-        CreateTimeEvent("ac_okr_reload", "ammo_check_on_reload", 0.1, ammo_check_mcm.check_ammo_after_reload)
-    end
+    -- Post-reload ammo check is handled globally by the main mod's "Auto-Check After Reload"
+    -- (Behaviour) option, which fires on the reload animation end for any reload, including this one.
 end
 
 -- ### Ammo type switching
@@ -385,10 +380,6 @@ function try_switch_to_ammo_type(weapon, ammo_type)  -- ammo_type is one-based
         weapon:unload_magazine(true)
         weapon:set_ammo_type(ammo_type - 1)  -- engine ammo type is zero-based
         db.actor:reload_weapon()
-    end
-
-    if mcm_check_after_reload then
-        CreateTimeEvent("ac_okr_switch", "ammo_check_on_reload", 0.2, ammo_check_mcm.check_ammo_after_reload)
     end
     return true
 end

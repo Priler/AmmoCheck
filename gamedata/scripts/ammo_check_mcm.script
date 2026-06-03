@@ -65,15 +65,23 @@ local ac_inspect_pending = false  -- arms the mutator to override engine's anm_b
 local ac_cooldown_until = 0  -- time_global() value (ms) when the ammo-check-key cooldown expires. Fixed AC_COOLDOWN_MS window from when check_Ammo commits. Subsequent key presses for the SAME weapon while still in cooldown are ignored.
 local ac_last_weapon_id = 0  -- weapon id the previous check was for. If the player switches weapons, the next key press resets cooldown + hides stale text and proceeds with the new weapon.
 local ac_message_until = 0   -- time_global() value (ms) when the displayed message visually disappears. Tracked separately from cooldown because msg_duration (1-5s) may outlive the cooldown (3s) - we hide the stale message before processing the next press.
+local ac_anim_block_until = 0  -- time_global() (ms) upper bound for the reload-block window. While set and the weapon is non-idle (the check animation is playing), on_before_key_press blocks the reload bind so it cannot cut the animation short.
 
 -- Fixed cooldown window for the ammo-check key, independent of msg_duration (which only
 -- affects how long the text stays on screen). Keep short so the player can re-trigger
 -- quickly; long enough to cover typical animation+display setup time.
 local AC_COOLDOWN_MS = 3000
+-- Upper bound on how long reload stays blocked after a check commits. The weapon-state check
+-- releases the block as soon as the animation ends; this only caps a stuck state.
+local AC_ANIM_BLOCK_MS = 5000
+local block_reload_during_check = true  -- MCM: prevent the reload key from interrupting the check animation
+local ac_mags_suppressed = false  -- true while we have unregistered the Mags Redux reload handler for the block window
+local onekey_enabled = false      -- cached: One-Key owns/suppresses the Reload bind itself, so we must not also touch the Mags handler
 local use_clr = true
 local hide_counter = true
 local hide_ammo_icon = true
 local anim_mode = 2             -- 0: default (hide/show), 1: lower weapon, 2: fake reload
+local grenade_anim_mode = 0     -- check while in grenade-launcher mode: 0 lower weapon (default), 1 hide/show, 2 fake reload (plays grenade-load anim), 3 message only
 local mcm_key = DIK_keys.DIK_F
 local msg_duration = 2
 local show_ammo_type = false
@@ -409,6 +417,48 @@ local direction_keys = {
 
 local weapon_hidden = false
 
+-- Mags Redux reloads from its OWN on_before_key_press handler, calling actor_on_weapon_reload
+-- directly, so it ignores our flags.ret_value. To fully block reload during the check window we
+-- also unregister that handler (same trick One-Key uses) and restore it afterwards. Guarded by
+-- ac_mags_suppressed so we register/unregister exactly once. No-op when Mags is absent.
+local function set_ac_mags_suppressed(suppress)
+    if not (magazines and magazines.on_key_press) then return end
+    if suppress and not ac_mags_suppressed then
+        UnregisterScriptCallback("on_before_key_press", magazines.on_key_press)
+        ac_mags_suppressed = true
+    elseif (not suppress) and ac_mags_suppressed then
+        RegisterScriptCallback("on_before_key_press", magazines.on_key_press)
+        ac_mags_suppressed = false
+    end
+end
+
+-- restore the Mags handler and stop blocking; safe to call repeatedly
+local function ac_end_reload_block()
+    ac_anim_block_until = 0
+    RemoveTimeEvent("ac_mags_block", "arm")
+    RemoveTimeEvent("ac_mags_block", "restore")
+    set_ac_mags_suppressed(false)
+end
+
+-- Block the reload bind while a check animation is playing, so a reload cannot cut it short.
+-- The window is armed in check_Ammo; the weapon being non-idle means the animation is actually
+-- running (message-only checks keep it idle and so are never blocked). ret_value=false consumes
+-- the press. One-Key, when enabled, owns the reload bind separately; this is for the default path.
+function on_before_key_press(key, bind, dis, flags)
+    if time_global() >= ac_anim_block_until then return end  -- window is the master gate
+    bind = bind or dik_to_bind(key)
+    if bind ~= key_bindings.kWPN_RELOAD then return end
+    -- only block while an animation is actually running: path A (native inspect), a fake reload,
+    -- or any path that put the weapon in a non-idle HUD state. Message-only checks stay idle and
+    -- set no flag, so they never block reload even though the window is armed.
+    local wpn = db.actor and db.actor:active_item()
+    local anim_playing = ac_pending_inspect_anim_playing or is_fake_reload
+        or (wpn and IsWeapon(wpn) and wpn:get_state() ~= 0)
+    if anim_playing then
+        flags.ret_value = false
+    end
+end
+
 function on_key_press(key)
     local bind = dik_to_bind(key)
     if weapon_hidden and not direction_keys[bind] then
@@ -453,7 +503,13 @@ function on_key_press(key)
         end
     end
 
+    -- One-Key owns ammo-check (via key hold); ignore the standalone ammo-check key while it is on
+    if onekey_enabled then return end
+    if mcm_key == DIK_keys.DIK_ESCAPE then return end  -- unbound (set to none via Unbind / ESC)
     if key ~= mcm_key then return end
+    -- the simple ammo-check key may not share the Reload bind: it would fire on every reload and
+    -- the two animations would fight. Ignore it here; reload-triggered checks are the One-Key job.
+    if dik_to_bind(key) == key_bindings.kWPN_RELOAD then return end
     if not mcm_keybinds then
         check_Ammo()
         return
@@ -464,7 +520,10 @@ function on_key_press(key)
 end
 
 function on_key_hold(key)
+    if onekey_enabled then return end  -- One-Key owns ammo-check; ignore the standalone key
+    if mcm_key == DIK_keys.DIK_ESCAPE then return end  -- unbound
     if key ~= mcm_key then return end
+    if dik_to_bind(key) == key_bindings.kWPN_RELOAD then return end  -- reload bind reserved; use One-Key
     if ui_mcm.get_mod_key(modifier) then
         modes[mode]["function"](key)
     end
@@ -579,8 +638,10 @@ end
 local AC_CURSOR_CX = 512
 local AC_CURSOR_CY = 384
 local AC_CURSOR_VPAD = 24
-local function ac_render_layout()
-    local p = render_position or 3
+-- pos_override (optional): a render-position index that wins over the configured render_position,
+-- so a sibling feature can pin its message somewhere (e.g. fire mode forcing screen bottom)
+local function ac_render_layout(pos_override)
+    local p = pos_override or render_position or 3
     local gap = render_cursor_gap or 80
     local cx_left = (1024 - AC_RENDER_W) / 2  -- x for a centered full-width line
     if p == 0 then     -- top-left
@@ -599,6 +660,10 @@ local function ac_render_layout()
         return 0, AC_CURSOR_CX + gap, AC_CURSOR_CY - 12
     elseif p == 7 then -- near cursor, bottom (centered, sits gap px below center)
         return 2, cx_left, AC_CURSOR_CY + gap
+    elseif p == 8 then -- bottom-right
+        return 1, 1024 - 20 - AC_RENDER_W, 600
+    elseif p == 9 then -- bottom-left
+        return 0, 20, 600
     end
     return 2, cx_left, 600
 end
@@ -648,9 +713,9 @@ end
 -- as two side-by-side single-color controls. Measured and laid out as a group so it
 -- honors the render position/alignment without any mid-string %c gap.
 local AC_COMBINED_GAP = 6  -- px between main text and tag (1024x768 virtual space)
-function ac_msg_overlay:show_combined(main_str, main_clr, tag_str, tag_clr, duration)
+function ac_msg_overlay:show_combined(main_str, main_clr, tag_str, tag_clr, duration, pos)
     if not main_str or main_str == "" then return end
-    local align, x, y1 = ac_render_layout()
+    local align, x, y1 = ac_render_layout(pos)
 
     self:set_plain(self.l1main, main_str, main_clr or clr06_White)
     self:set_plain(self.l1tag,  tag_str,  tag_clr or clr06_White)
@@ -673,6 +738,7 @@ function ac_msg_overlay:show_combined(main_str, main_clr, tag_str, tag_clr, dura
     -- combined uses its own controls; clear the %c single-line controls
     self:hide_line(self.l1)
     self:hide_line(self.l2)
+    self:hide_segs()
 
     self.visible_until = time_global() + math_floor((duration or 2) * 1000)
     if not self.added then
@@ -688,9 +754,76 @@ function ac_msg_overlay:show_combined(main_str, main_clr, tag_str, tag_clr, dura
     end
 end
 
-function ac_msg_overlay:show(message, clr, line2, line2_clr, duration)
+-- Render up to N single-color segments side by side as ONE group, each with its own color.
+-- Same technique as show_combined (set_plain controls, no mid-string %c), so the center/right
+-- alignment width quirk never applies. segments = { { str=, clr=, gap= }, ... }; gap is the
+-- pixel space placed BEFORE that segment (0 makes it butt against the previous one).
+function ac_msg_overlay:show_segments(segments, duration, pos)
+    local segs = {}
+    for i = 1, #segments do
+        local s = segments[i]
+        if s and s.str and s.str ~= "" then segs[#segs + 1] = s end
+    end
+    if #segs == 0 then return end
+
+    -- lazily grow a control pool to match the segment count
+    self.seg_lines = self.seg_lines or {}
+    while #self.seg_lines < #segs do
+        self.seg_lines[#self.seg_lines + 1] = self:make_line()
+    end
+
+    local align, x, y1 = ac_render_layout(pos)
+
+    local widths = {}
+    local total_w = 0
+    for i = 1, #segs do
+        self:set_plain(self.seg_lines[i], segs[i].str, segs[i].clr or clr06_White)
+        widths[i] = self.seg_lines[i].text:GetWidth()
+        total_w = total_w + widths[i] + (i > 1 and (segs[i].gap or 0) or 0)
+    end
+
+    local group_left
+    if align == 2 then
+        group_left = (x + AC_RENDER_W / 2) - total_w / 2
+    elseif align == 1 then
+        group_left = (x + AC_RENDER_W) - total_w
+    else
+        group_left = x
+    end
+
+    local cur = group_left
+    for i = 1, #segs do
+        if i > 1 then cur = cur + (segs[i].gap or 0) end
+        self:place_plain(self.seg_lines[i], cur, y1)
+        cur = cur + widths[i]
+    end
+    for i = #segs + 1, #self.seg_lines do
+        self:hide_line(self.seg_lines[i])
+    end
+
+    -- clear the other modes' controls
+    self:hide_line(self.l1)
+    self:hide_line(self.l2)
+    self:hide_line(self.l1main)
+    self:hide_line(self.l1tag)
+
+    self.visible_until = time_global() + math_floor((duration or 2) * 1000)
+    if not self.added then
+        local hud = get_hud()
+        if hud then
+            hud:AddDialogToRender(self)
+            self.added = true
+        end
+    end
+    if not self.registered then
+        RegisterScriptCallback("actor_on_update", self)
+        self.registered = true
+    end
+end
+
+function ac_msg_overlay:show(message, clr, line2, line2_clr, duration, pos)
     if not message or message == "" then return end
-    local align, x, y1 = ac_render_layout()
+    local align, x, y1 = ac_render_layout(pos)
 
     self:place_line(self.l1, message, argb_to_tag(clr), align, x, y1)
 
@@ -703,6 +836,7 @@ function ac_msg_overlay:show(message, clr, line2, line2_clr, duration)
     -- not in combined mode: clear its dedicated controls
     self:hide_line(self.l1main)
     self:hide_line(self.l1tag)
+    self:hide_segs()
 
     self.visible_until = time_global() + math_floor((duration or 2) * 1000)
 
@@ -719,11 +853,18 @@ function ac_msg_overlay:show(message, clr, line2, line2_clr, duration)
     end
 end
 
+function ac_msg_overlay:hide_segs()
+    if self.seg_lines then
+        for i = 1, #self.seg_lines do self:hide_line(self.seg_lines[i]) end
+    end
+end
+
 function ac_msg_overlay:hide()
     self:hide_line(self.l1)
     self:hide_line(self.l2)
     self:hide_line(self.l1main)
     self:hide_line(self.l1tag)
+    self:hide_segs()
     self.visible_until = 0
     if self.added then
         local hud = get_hud()
@@ -1027,19 +1168,35 @@ local function format_ammo_type_string(display_round, tag_round)
     return result, ammo_type, separate_tag
 end
 
+-- Tarkov-like rough count: round to the nearest 5, clamped to [5, max]. The full case is handled
+-- by the caller (shows "Full"), so this only runs for partial magazines.
+local function ammo_approx(current, max)
+    local a = math_floor((current + 2.5) / 5) * 5
+    if a < 5 then a = 5 end
+    if a > max then a = max end
+    return a
+end
+
 -- format ammo display based on display_mode
 -- display_round: for ammo type name (chambered round)
 -- tag_round: for ammo tag classification (magazine contents)
 -- returns: message, ammo_type_key, tag_for_separate_line
 local function format_ammo_message(text_msg, current, max, display_round, tag_round)
     local result
-    
+
     if display_mode == 0 then
         -- text only
         result = get_translation(text_msg)
     elseif display_mode == 1 then
         -- numeric only
         result = string_format("%d/%d", current, max)
+    elseif display_mode == 3 then
+        -- Tarkov-like: a rough count, or "Full" when topped off / over
+        if current >= max then
+            result = get_translation("st_ac_full")
+        else
+            result = get_translation("st_ac_approx") .. " " .. tostring(ammo_approx(current, max))
+        end
     else
         -- both
         result = string_format("%s (%d/%d)", get_translation(text_msg), current, max)
@@ -1291,6 +1448,54 @@ local function display_ammo_status(message, clr, ammo_type, separate_tag)
     ac_message_until = time_global() + math_floor(msg_duration * 1000)
 end
 
+-- Public single-line display used by sibling features (e.g. One-Key Fire Mode). Routes through the
+-- custom HUD overlay when "Custom Text Rendering" is on, otherwise the actor_menu message line, so
+-- those features inherit the same font, position and duration. clr is an ARGB int or nil (white).
+function show_single_line(text, clr, pos)
+    if not text or text == "" then return end
+    local base_clr = clr or clr06_White
+    if custom_render then
+        get_ac_overlay():show(text, base_clr, nil, nil, msg_duration, pos)
+        ac_message_until = time_global() + math_floor(msg_duration * 1000)
+    else
+        -- not display_message: that path is gated by the ammo-check "Show Message" toggle, which
+        -- is unrelated to a caller like the fire mode feature that owns its own enable switch
+        actor_menu.set_msg(1, text, msg_duration, base_clr)
+    end
+end
+
+-- whether the custom HUD overlay is active. Callers that build per-character colored strings
+-- (inline %c tags) need this: the overlay renders complex mode, the actor_menu line does not.
+function is_custom_render()
+    return custom_render and true or false
+end
+
+-- shared on-screen message duration (seconds), so sibling features match the ammo-check timing
+function get_msg_duration()
+    return msg_duration or 2
+end
+
+-- configured render-position index (see ac_render_layout); sibling features resolving "default"
+function get_render_position()
+    return render_position or 3
+end
+
+-- Public multi-segment display for callers that need several colors on one line (e.g. fire mode
+-- dots: white lit dots, almost-black empty dots, optional colored letter). Each segment is a
+-- single-color control, so it works at any render position. Falls back to a single concatenated,
+-- single-color line when the custom overlay is off (per-segment color is then unavailable).
+function show_segments(segments, pos)
+    if not (segments and #segments > 0) then return end
+    if custom_render then
+        get_ac_overlay():show_segments(segments, msg_duration, pos)
+        ac_message_until = time_global() + math_floor(msg_duration * 1000)
+    else
+        local buf = {}
+        for i = 1, #segments do buf[#buf + 1] = segments[i].str or "" end
+        actor_menu.set_msg(1, table.concat(buf), msg_duration, segments[1].clr)
+    end
+end
+
 -- auto-check after reload
 local pending_reload_check = false
 
@@ -1309,6 +1514,13 @@ end
 
 -- callback for HUD animation end
 function actor_on_hud_animation_end(item, section, motion, state, slot)
+    -- release the reload-block window (and restore the Mags handler) as soon as the check animation
+    -- ends, instead of waiting for the AC_ANIM_BLOCK_MS cap. Runs before the auto_check_reload
+    -- early-return below so it always fires.
+    if ac_anim_block_until > 0 or ac_mags_suppressed then
+        ac_end_reload_block()
+    end
+
     -- stop empty mag sound if playing (handles cancelled animations)
     if empty_mag_sound and empty_mag_sound:playing() then
         empty_mag_sound:stop()
@@ -1458,6 +1670,7 @@ function on_game_start()
     RegisterScriptCallback("actor_on_first_update", actor_on_first_update)
     RegisterScriptCallback("on_option_change", on_option_change)
     RegisterScriptCallback("on_key_press", on_key_press)
+    RegisterScriptCallback("on_before_key_press", on_before_key_press)
     RegisterScriptCallback("actor_on_hud_animation_end", actor_on_hud_animation_end)
     RegisterScriptCallback("actor_on_weapon_jammed", actor_on_weapon_jammed)
     
@@ -1610,164 +1823,140 @@ end
 function on_mcm_load()
     return {
         id = "rax_ammo_check",
-        sh = true,
         gr = {
-            -- header
-            { id = "ammo_check", type = "slide", link = "ui_options_slider_player", text = "ui_mm_title_rax_ammo_check", size = { 512, 50 }, spacing = 20 },
-            
-            -- display
-            { id = "divider_display", type = "line" },
-            { id = "title_display", type = "title", text = "ui_mcm_rax_ammo_check_title_display" },
-            { id = "show_message", type = "check", val = 1, def = true },
-            { id = "hide_msg_on_inspect", type = "check", val = 1, def = false },
-            { id = "usecolor", type = "check", val = 1, def = true },
-            { id = "color_intensity", type = "track", val = 2, min = 30, max = 100, step = 10, def = 70 },
-            { id = "display_mode", type = "list", val = 2, def = 0,
-                content = {
-                    { 0, "dm_text" },
-                    { 1, "dm_numeric" },
-                    { 2, "dm_both" }
-                }
-            },
-            { id = "minimalist_bar", type = "check", val = 1, def = false },
-            { id = "custom_render", type = "check", val = 1, def = true },
-            { id = "render_font_family", type = "list", val = 2, def = 0,
-                content = {
-                    { 0, "ff_graffiti" },
-                    { 1, "ff_letterica" },
-                    { 2, "ff_system" },
-                    { 3, "ff_letterica_pure" }
-                }
-            },
-            { id = "render_font_size", type = "list", val = 2, def = 3,
-                content = {
-                    { 1, "fs_small" },
-                    { 2, "fs_medium" },
-                    { 3, "fs_large" },
-                    { 5, "fs_large_plus" },
-                    { 4, "fs_xlarge" }
-                }
-            },
-            { id = "render_position", type = "list", val = 2, def = 3,
-                content = {
-                    { 0, "rp_tl" },
-                    { 1, "rp_tr" },
-                    { 2, "rp_center" },
-                    { 3, "rp_bottom" },
-                    { 4, "rp_cursor_left" },
-                    { 5, "rp_cursor_top" },
-                    { 6, "rp_cursor_right" },
-                    { 7, "rp_cursor_bottom" }
-                }
-            },
-            { id = "render_cursor_gap", type = "track", val = 2, min = 0, max = 300, step = 10, def = 80 },
-            { id = "show_ammo_type", type = "check", val = 1, def = false },
-            { id = "show_ammo_tag", type = "check", val = 1, def = true },
-            { id = "highlight_ammo_mode", type = "list", val = 2, def = 0,
-                content = {
-                    { 0, "ham_none" },
-                    { 1, "ham_whole" },
-                    { 2, "ham_separate" },
-                    { 3, "ham_combined" }
-                }
-            },
-            { id = "msg_duration", type = "track", val = 2, min = 1, max = 5, step = 0.5, def = 2 },
-            
-            -- hud
-            { id = "divider_hud", type = "line" },
-            { id = "title_hud", type = "title", text = "ui_mcm_rax_ammo_check_title_hud" },
-            { id = "hidecounter", type = "check", val = 1, def = true },
-            { id = "hideicon", type = "check", val = 1, def = true },
-            
-            -- behavior
-            { id = "divider_behavior", type = "line" },
-            { id = "title_behavior", type = "title", text = "ui_mcm_rax_ammo_check_title_behavior" },
-            { id = "check_grenade_mode", type = "check", val = 1, def = false },
-            { id = "auto_check_reload", type = "check", val = 1, def = false },
-            
-            -- animation
-            { id = "divider_anim", type = "line" },
-            { id = "title_anim", type = "title", text = "ui_mcm_rax_ammo_check_title_anim" },
-            { id = "enable_animations", type = "check", val = 1, def = true },
-            { id = "anim_mode", type = "list", val = 2, def = 2,
-                content = {
-                    { 0, "anim_mode_default" },
-                    { 1, "anim_mode_lower" },
-                    { 2, "anim_mode_fake_reload" }
-                }
-            },
-            { id = "no_magazine_fallback", type = "list", val = 2, def = 1,
-                content = {
-                    { 0, "fallback_hide_show" },
-                    { 1, "fallback_lower" },
-                    { 2, "fallback_none" }
-                }
-            },
-            { id = "fake_reload_fallback", type = "list", val = 2, def = 1,
-                content = {
-                    { 0, "fallback_hide_show" },
-                    { 1, "fallback_lower" }
-                }
-            },
-            { id = "empty_mag_fallback", type = "list", val = 2, def = 0,
-                content = {
-                    { 0, "empty_mag_reload_anim" },
-                    { 1, "empty_mag_animate" },
-                    { 2, "empty_mag_lower" }
-                }
-            },
-            { id = "treat_one_chamber_as_non_empty", type = "check", val = 1, def = false },
-            { id = "fake_reload_bolt_cycle", type = "check", val = 1, def = true },
-            { id = "force_bolt_cycle_external_mag", type = "check", val = 1, def = false },
-            { id = "fake_reload_bolt_eject", type = "check", val = 1, def = false },
-            { id = "fake_reload_pump_rack", type = "check", val = 1, def = true },
-            { id = "fake_reload_pump_eject", type = "check", val = 1, def = false },
-            { id = "fake_reload_ignore_list", type = "check", val = 1, def = true },
-            { id = "busy_hands_delay", type = "track", val = 2, min = 0.5, max = 3, step = 0.25, def = 1 },
-            
-            -- keybind
-            { id = "divider_keys", type = "line" },
-            { id = "title_keys", type = "title", text = "ui_mcm_rax_ammo_check_title_keys" },
-            { id = "keybind", type = "key_bind", val = 2, def = DIK_keys.DIK_F },
-            { id = "modifier", type = ui_mcm.kb_mod_radio, val = 2, def = 0, hint = "mcm_kb_modifier", 
-                content = { { 0, "mcm_kb_mod_none" }, { 1, "mcm_kb_mod_shift" }, { 3, "mcm_kb_mod_alt" } } 
-            },
-            { id = "mode", type = ui_mcm.kb_mod_radio, val = 2, def = 2, hint = "mcm_kb_mode", 
-                content = { { 0, "mcm_kb_mode_press" }, { 1, "mcm_kb_mode_dtap" }, { 2, "mcm_kb_mode_hold" } } 
-            },
-            { id = "desc_mcm", type = "desc", text = "ui_mcm_rax_ammo_check_update_mcm", clr = { 255, 175, 0, 0 },
-                precondition = { function() return not mcm_keybinds end }
-            },
+            -- ### Display
+            { id = "display", sh = true, text = "ui_mcm_rax_ammo_check_title_display", gr = {
+                { id = "slide_display", type = "slide", link = "ui_options_slider_player", text = "ui_mcm_rax_ammo_check_title_display", size = { 512, 50 }, spacing = 20 },
+                { id = "show_message", type = "check", val = 1, def = true },
+                { id = "hide_msg_on_inspect", type = "check", val = 1, def = false },
+                { id = "usecolor", type = "check", val = 1, def = true },
+                { id = "color_intensity", type = "track", val = 2, min = 30, max = 100, step = 10, def = 70 },
+                { id = "display_mode", type = "list", val = 2, def = 0,
+                    content = { { 0, "dm_text" }, { 1, "dm_numeric" }, { 2, "dm_both" }, { 3, "dm_tarkov" } }
+                },
+                { id = "minimalist_bar", type = "check", val = 1, def = false },
+                { id = "custom_render", type = "check", val = 1, def = true },
+                { id = "render_font_family", type = "list", val = 2, def = 0,
+                    content = { { 0, "ff_graffiti" }, { 1, "ff_letterica" }, { 2, "ff_system" }, { 3, "ff_letterica_pure" } }
+                },
+                { id = "render_font_size", type = "list", val = 2, def = 3,
+                    content = { { 1, "fs_small" }, { 2, "fs_medium" }, { 3, "fs_large" }, { 5, "fs_large_plus" }, { 4, "fs_xlarge" } }
+                },
+                { id = "render_position", type = "list", val = 2, def = 3,
+                    content = { { 0, "rp_tl" }, { 1, "rp_tr" }, { 2, "rp_center" }, { 3, "rp_bottom" }, { 8, "rp_br" }, { 9, "rp_bl" }, { 4, "rp_cursor_left" }, { 5, "rp_cursor_top" }, { 6, "rp_cursor_right" }, { 7, "rp_cursor_bottom" } }
+                },
+                { id = "render_cursor_gap", type = "track", val = 2, min = 0, max = 300, step = 10, def = 80 },
+                { id = "show_ammo_type", type = "check", val = 1, def = false },
+                { id = "show_ammo_tag", type = "check", val = 1, def = true },
+                { id = "highlight_ammo_mode", type = "list", val = 2, def = 0,
+                    content = { { 0, "ham_none" }, { 1, "ham_whole" }, { 2, "ham_separate" }, { 3, "ham_combined" } }
+                },
+                { id = "msg_duration", type = "track", val = 2, min = 1, max = 5, step = 0.5, def = 2 },
+            }},
 
-            -- one key weapon controls (logic lives in ammo_check_onekey_mcm.script)
-            { id = "divider_onekey", type = "line" },
-            { id = "title_onekey", type = "title", text = "ui_mm_title_rax_ammo_check_onekey" },
-            { id = "onekey_desc", type = "desc", text = "ui_mcm_rax_ammo_check_onekey_desc" },
-            { id = "onekey_enable", type = "check", val = 1, def = false },
-            { id = "onekey_key_reload", type = "key_bind", val = 2, def = DIK_keys.DIK_R },
-            { id = "onekey_reload_key_unjams", type = "check", val = 1, def = false },
-            { id = "onekey_focuses_pda", type = "check", val = 1, def = false },
-            { id = "onekey_modifier_unjam", type = ui_mcm.kb_mod_radio, val = 2, def = 2, hint = "mcm_kb_modifier",
-                content = { { 1, "mcm_kb_mod_shift" }, { 2, "mcm_kb_mod_ctrl" }, { 3, "mcm_kb_mod_alt" } }
-            },
-            { id = "onekey_doubletap_behavior", type = "list", val = 0, def = "situational",
-                content = {
-                    { "none", "dt_none" },
-                    { "reload", "dt_reload" },
-                    { "next_ammo_type", "dt_next" },
-                    { "ammo_wheel", "dt_wheel" },
-                    { "situational", "dt_situational" }
-                }
-            },
-            { id = "onekey_check_ammo_after_reload", type = "check", val = 1, def = false },
-            { id = "onekey_desc_update_mcm", type = "desc", text = "ui_mcm_rax_ammo_check_onekey_update_mcm", clr = { 255, 175, 0, 0 },
-                precondition = { function() return not mcm_keybinds end }
-            },
+            -- ### HUD / Behavior
+            { id = "hud_behavior", sh = true, text = "ui_mcm_rax_ammo_check_title_hud_behavior", gr = {
+                { id = "slide_hud_behavior", type = "slide", link = "ui_options_slider_player", text = "ui_mcm_rax_ammo_check_title_hud_behavior", size = { 512, 50 }, spacing = 20 },
+                { id = "hidecounter", type = "check", val = 1, def = true },
+                { id = "hideicon", type = "check", val = 1, def = true },
+                { id = "hide_hud", type = "check", val = 1, def = false },
+                { id = "check_grenade_mode", type = "check", val = 1, def = false },
+                { id = "auto_check_reload", type = "check", val = 1, def = false },
+            }},
 
-            -- debug
-            { id = "divider_debug", type = "line" },
-            { id = "title_debug", type = "title", text = "ui_mcm_rax_ammo_check_title_debug" },
-            { id = "debug_mode", type = "check", val = 1, def = false },
+            -- ### Animation
+            { id = "animation", sh = true, text = "ui_mcm_rax_ammo_check_title_anim", gr = {
+                { id = "slide_animation", type = "slide", link = "ui_options_slider_player", text = "ui_mcm_rax_ammo_check_title_anim", size = { 512, 50 }, spacing = 20 },
+                { id = "enable_animations", type = "check", val = 1, def = true },
+                { id = "anim_mode", type = "list", val = 2, def = 2,
+                    content = { { 0, "anim_mode_default" }, { 1, "anim_mode_lower" }, { 2, "anim_mode_fake_reload" } }
+                },
+                { id = "grenade_anim_mode", type = "list", val = 2, def = 0,
+                    content = { { 0, "gren_lower" }, { 1, "gren_hide_show" }, { 2, "gren_fake_reload" }, { 3, "gren_message" } }
+                },
+                { id = "no_magazine_fallback", type = "list", val = 2, def = 1,
+                    content = { { 0, "fallback_hide_show" }, { 1, "fallback_lower" }, { 2, "fallback_none" } }
+                },
+                { id = "fake_reload_fallback", type = "list", val = 2, def = 1,
+                    content = { { 0, "fallback_hide_show" }, { 1, "fallback_lower" } }
+                },
+                { id = "empty_mag_fallback", type = "list", val = 2, def = 0,
+                    content = { { 0, "empty_mag_reload_anim" }, { 1, "empty_mag_animate" }, { 2, "empty_mag_lower" } }
+                },
+                { id = "treat_one_chamber_as_non_empty", type = "check", val = 1, def = false },
+                { id = "fake_reload_bolt_cycle", type = "check", val = 1, def = true },
+                { id = "force_bolt_cycle_external_mag", type = "check", val = 1, def = false },
+                { id = "fake_reload_bolt_eject", type = "check", val = 1, def = false },
+                { id = "fake_reload_pump_rack", type = "check", val = 1, def = true },
+                { id = "fake_reload_pump_eject", type = "check", val = 1, def = false },
+                { id = "fake_reload_ignore_list", type = "check", val = 1, def = true },
+                { id = "busy_hands_delay", type = "track", val = 2, min = 0.5, max = 3, step = 0.25, def = 1 },
+                { id = "block_reload_during_check", type = "check", val = 1, def = true },
+            }},
+
+            -- ### Keybind
+            { id = "keybind", sh = true, text = "ui_mcm_rax_ammo_check_title_keys", gr = {
+                { id = "slide_keybind", type = "slide", link = "ui_options_slider_player", text = "ui_mcm_rax_ammo_check_title_keys", size = { 512, 50 }, spacing = 20 },
+                { id = "keybind", type = "key_bind", val = 2, def = DIK_keys.DIK_F },
+                { id = "modifier", type = ui_mcm.kb_mod_radio, val = 2, def = 0,
+                    content = { { 0, "mcm_kb_mod_none" }, { 1, "mcm_kb_mod_shift" }, { 3, "mcm_kb_mod_alt" } }
+                },
+                { id = "mode", type = ui_mcm.kb_mod_radio, val = 2, def = 2,
+                    content = { { 0, "mcm_kb_mode_press" }, { 1, "mcm_kb_mode_dtap" }, { 2, "mcm_kb_mode_hold" } }
+                },
+                { id = "desc_mcm", type = "desc", text = "ui_mcm_rax_ammo_check_update_mcm", clr = { 255, 175, 0, 0 },
+                    precondition = { function() return not mcm_keybinds end }
+                },
+            }},
+
+            -- ### Fire Check (logic lives in ammo_check_firemode_mcm.script)
+            { id = "firemode", sh = true, text = "ui_mcm_rax_ammo_check_title_firemode", gr = {
+                { id = "slide_firemode", type = "slide", link = "ui_options_slider_player", text = "ui_mcm_rax_ammo_check_title_firemode", size = { 512, 50 }, spacing = 20 },
+                { id = "info_desc", type = "desc", text = "ui_mcm_rax_ammo_check_firemode_desc" },
+                { id = "enable", type = "check", val = 1, def = false },
+                { id = "key", type = "key_bind", val = 2, def = DIK_keys.DIK_X },
+                { id = "modifier_prev", type = ui_mcm.kb_mod_radio, val = 2, def = 1,
+                    content = { { 1, "mcm_kb_mod_shift" }, { 2, "mcm_kb_mod_ctrl" }, { 3, "mcm_kb_mod_alt" } }
+                },
+                { id = "color_text", type = "check", val = 1, def = true },
+                { id = "display_style", type = "list", val = 0, def = "text",
+                    content = { { "text", "ds_text" }, { "none", "ds_none" }, { "dots", "ds_dots" }, { "dots_alt", "ds_dots_alt" }, { "ready_or_not", "ds_ron" }, { "ready_or_not_notext", "ds_ron_notext" } }
+                },
+                { id = "position", type = "list", val = 0, def = "default",
+                    content = { { "default", "pos_default" }, { "screen_bottom", "pos_bottom" } }
+                },
+                { id = "show_letter", type = "check", val = 1, def = false },
+                { id = "desc_update_mcm", type = "desc", text = "ui_mcm_rax_ammo_check_onekey_update_mcm", clr = { 255, 175, 0, 0 },
+                    precondition = { function() return not mcm_keybinds end }
+                },
+            }},
+
+            -- ### One Key (logic lives in ammo_check_onekey_mcm.script)
+            { id = "onekey", sh = true, text = "ui_mm_title_rax_ammo_check_onekey", gr = {
+                { id = "slide_onekey", type = "slide", link = "ui_options_slider_player", text = "ui_mm_title_rax_ammo_check_onekey", size = { 512, 50 }, spacing = 20 },
+                { id = "info_desc", type = "desc", text = "ui_mcm_rax_ammo_check_onekey_desc" },
+                { id = "enable", type = "check", val = 1, def = false },
+                { id = "key_reload", type = "key_bind", val = 2, def = DIK_keys.DIK_R },
+                { id = "reload_key_unjams", type = "check", val = 1, def = false },
+                { id = "focuses_pda", type = "check", val = 1, def = false },
+                { id = "modifier_unjam", type = ui_mcm.kb_mod_radio, val = 2, def = 2,
+                    content = { { 1, "mcm_kb_mod_shift" }, { 2, "mcm_kb_mod_ctrl" }, { 3, "mcm_kb_mod_alt" } }
+                },
+                { id = "doubletap_behavior", type = "list", val = 0, def = "situational",
+                    content = { { "none", "dt_none" }, { "reload", "dt_reload" }, { "next_ammo_type", "dt_next" }, { "ammo_wheel", "dt_wheel" }, { "situational", "dt_situational" } }
+                },
+                { id = "hold_ms", type = "track", val = 2, min = 100, max = 600, step = 25, def = 200 },
+                { id = "doubletap_ms", type = "track", val = 2, min = 50, max = 500, step = 25, def = 200 },
+                { id = "desc_update_mcm", type = "desc", text = "ui_mcm_rax_ammo_check_onekey_update_mcm", clr = { 255, 175, 0, 0 },
+                    precondition = { function() return not mcm_keybinds end }
+                },
+            }},
+
+            -- ### Debug
+            { id = "debug", sh = true, text = "ui_mcm_rax_ammo_check_title_debug", gr = {
+                { id = "slide_debug", type = "slide", link = "ui_options_slider_player", text = "ui_mcm_rax_ammo_check_title_debug", size = { 512, 50 }, spacing = 20 },
+                { id = "debug_mode", type = "check", val = 1, def = false },
+            }},
         }
     }
 end
@@ -1783,76 +1972,91 @@ function on_option_change()
     
     if ui_mcm then
         -- display settings
-        local show_msg_val = ui_mcm.get("rax_ammo_check/show_message")
+        local show_msg_val = ui_mcm.get("rax_ammo_check/display/show_message")
         show_message = (show_msg_val == true or show_msg_val == 1 or show_msg_val == nil)  -- default true
-        local hide_inspect_val = ui_mcm.get("rax_ammo_check/hide_msg_on_inspect")
+        local hide_inspect_val = ui_mcm.get("rax_ammo_check/display/hide_msg_on_inspect")
         hide_msg_on_inspect = (hide_inspect_val == true or hide_inspect_val == 1)  -- default false
-        local clr_val = ui_mcm.get("rax_ammo_check/usecolor")
+        local clr_val = ui_mcm.get("rax_ammo_check/display/usecolor")
         -- MCM might return true/false, 1/0, or nil
         use_clr = (clr_val == true or clr_val == 1)
-        color_intensity = ui_mcm.get("rax_ammo_check/color_intensity") or 70
+        color_intensity = ui_mcm.get("rax_ammo_check/display/color_intensity") or 70
         update_colors() -- apply color intensity changes
         print_dbg("Settings loaded: use_clr=%s (raw=%s), color_intensity=%s", tostring(use_clr), tostring(clr_val), tostring(color_intensity))
-        display_mode = ui_mcm.get("rax_ammo_check/display_mode") or 0
-        local min_bar_val = ui_mcm.get("rax_ammo_check/minimalist_bar")
+        display_mode = ui_mcm.get("rax_ammo_check/display/display_mode") or 0
+        local min_bar_val = ui_mcm.get("rax_ammo_check/display/minimalist_bar")
         minimalist_bar = (min_bar_val == true or min_bar_val == 1)  -- default false
-        local custom_render_val = ui_mcm.get("rax_ammo_check/custom_render")
+        local custom_render_val = ui_mcm.get("rax_ammo_check/display/custom_render")
         custom_render = (custom_render_val == true or custom_render_val == 1 or custom_render_val == nil)  -- default true
-        render_font_family = ui_mcm.get("rax_ammo_check/render_font_family") or 0
-        render_font_size = ui_mcm.get("rax_ammo_check/render_font_size") or 3
-        render_position = ui_mcm.get("rax_ammo_check/render_position") or 3
-        render_cursor_gap = ui_mcm.get("rax_ammo_check/render_cursor_gap") or 80
+        render_font_family = ui_mcm.get("rax_ammo_check/display/render_font_family") or 0
+        render_font_size = ui_mcm.get("rax_ammo_check/display/render_font_size") or 3
+        render_position = ui_mcm.get("rax_ammo_check/display/render_position") or 3
+        render_cursor_gap = ui_mcm.get("rax_ammo_check/display/render_cursor_gap") or 80
         reset_ac_overlay()  -- rebuild on next show with current font/position settings
-        show_ammo_type = ui_mcm.get("rax_ammo_check/show_ammo_type")
+        show_ammo_type = ui_mcm.get("rax_ammo_check/display/show_ammo_type")
         if show_ammo_type == nil then show_ammo_type = true end
-        show_ammo_tag = ui_mcm.get("rax_ammo_check/show_ammo_tag")
+        show_ammo_tag = ui_mcm.get("rax_ammo_check/display/show_ammo_tag")
         if show_ammo_tag == nil then show_ammo_tag = true end
-        highlight_ammo_mode = ui_mcm.get("rax_ammo_check/highlight_ammo_mode") or 0
+        highlight_ammo_mode = ui_mcm.get("rax_ammo_check/display/highlight_ammo_mode") or 0
         print_dbg("Ammo settings: show_type=%s, show_tag=%s, highlight_mode=%s", tostring(show_ammo_type), tostring(show_ammo_tag), tostring(highlight_ammo_mode))
-        msg_duration = ui_mcm.get("rax_ammo_check/msg_duration") or 2
+        msg_duration = ui_mcm.get("rax_ammo_check/display/msg_duration") or 2
         
         -- hud settings
-        hide_counter = ui_mcm.get("rax_ammo_check/hidecounter")
+        hide_counter = ui_mcm.get("rax_ammo_check/hud_behavior/hidecounter")
         if hide_counter == nil then hide_counter = true end
-        hide_ammo_icon = ui_mcm.get("rax_ammo_check/hideicon")
+        hide_ammo_icon = ui_mcm.get("rax_ammo_check/hud_behavior/hideicon")
         if hide_ammo_icon == nil then hide_ammo_icon = true end
         
         -- behavior settings
-        check_grenade_mode = ui_mcm.get("rax_ammo_check/check_grenade_mode")
-        auto_check_reload = ui_mcm.get("rax_ammo_check/auto_check_reload")
+        check_grenade_mode = ui_mcm.get("rax_ammo_check/hud_behavior/check_grenade_mode")
+        auto_check_reload = ui_mcm.get("rax_ammo_check/hud_behavior/auto_check_reload")
         
         -- animation settings
-        local enable_val = ui_mcm.get("rax_ammo_check/enable_animations")
+        local enable_val = ui_mcm.get("rax_ammo_check/animation/enable_animations")
         enable_animations = (enable_val == true or enable_val == 1 or enable_val == nil)  -- default true
-        anim_mode = ui_mcm.get("rax_ammo_check/anim_mode") or 0
-        no_magazine_fallback = ui_mcm.get("rax_ammo_check/no_magazine_fallback") or 1
-        fake_reload_fallback = ui_mcm.get("rax_ammo_check/fake_reload_fallback") or 1
-        empty_mag_fallback = ui_mcm.get("rax_ammo_check/empty_mag_fallback") or 0
-        local treat_chamber_val = ui_mcm.get("rax_ammo_check/treat_one_chamber_as_non_empty")
+        anim_mode = ui_mcm.get("rax_ammo_check/animation/anim_mode") or 0
+        grenade_anim_mode = ui_mcm.get("rax_ammo_check/animation/grenade_anim_mode") or 0
+        no_magazine_fallback = ui_mcm.get("rax_ammo_check/animation/no_magazine_fallback") or 1
+        fake_reload_fallback = ui_mcm.get("rax_ammo_check/animation/fake_reload_fallback") or 1
+        empty_mag_fallback = ui_mcm.get("rax_ammo_check/animation/empty_mag_fallback") or 0
+        local treat_chamber_val = ui_mcm.get("rax_ammo_check/animation/treat_one_chamber_as_non_empty")
         treat_one_chamber_as_non_empty = (treat_chamber_val == true or treat_chamber_val == 1)  -- default false (fix applied)
-        local bolt_val = ui_mcm.get("rax_ammo_check/fake_reload_bolt_cycle")
+        local bolt_val = ui_mcm.get("rax_ammo_check/animation/fake_reload_bolt_cycle")
         fake_reload_bolt_cycle = (bolt_val == true or bolt_val == 1 or bolt_val == nil)  -- default true
-        local force_ext_val = ui_mcm.get("rax_ammo_check/force_bolt_cycle_external_mag")
+        local force_ext_val = ui_mcm.get("rax_ammo_check/animation/force_bolt_cycle_external_mag")
         force_bolt_cycle_external_mag = (force_ext_val == true or force_ext_val == 1)  -- default false
-        local bolt_eject_val = ui_mcm.get("rax_ammo_check/fake_reload_bolt_eject")
+        local bolt_eject_val = ui_mcm.get("rax_ammo_check/animation/fake_reload_bolt_eject")
         fake_reload_bolt_eject = (bolt_eject_val == true or bolt_eject_val == 1)  -- default false
-        local pump_val = ui_mcm.get("rax_ammo_check/fake_reload_pump_rack")
+        local pump_val = ui_mcm.get("rax_ammo_check/animation/fake_reload_pump_rack")
         fake_reload_pump_rack = (pump_val == true or pump_val == 1 or pump_val == nil)  -- default true
-        local pump_eject_val = ui_mcm.get("rax_ammo_check/fake_reload_pump_eject")
+        local pump_eject_val = ui_mcm.get("rax_ammo_check/animation/fake_reload_pump_eject")
         fake_reload_pump_eject = (pump_eject_val == true or pump_eject_val == 1)  -- default false
-        local ignore_val = ui_mcm.get("rax_ammo_check/fake_reload_ignore_list")
+        local ignore_val = ui_mcm.get("rax_ammo_check/animation/fake_reload_ignore_list")
         fake_reload_ignore_list = (ignore_val == true or ignore_val == 1 or ignore_val == nil)  -- default true
-        busy_hands_delay = ui_mcm.get("rax_ammo_check/busy_hands_delay") or 1
+        busy_hands_delay = ui_mcm.get("rax_ammo_check/animation/busy_hands_delay") or 1
+        local block_reload_val = ui_mcm.get("rax_ammo_check/animation/block_reload_during_check")
+        block_reload_during_check = (block_reload_val == true or block_reload_val == 1 or block_reload_val == nil)  -- default true
+        local onekey_en = ui_mcm.get("rax_ammo_check/onekey/enable")
+        onekey_enabled = (onekey_en == true or onekey_en == 1)
         print_dbg("Animation settings: enable=%s, anim_mode=%s, no_mag_fb=%s, fake_fb=%s, bolt=%s, bolt_eject=%s, pump=%s, pump_eject=%s, ignore=%s", tostring(enable_animations), anim_mode, no_magazine_fallback, fake_reload_fallback, tostring(fake_reload_bolt_cycle), tostring(fake_reload_bolt_eject), tostring(fake_reload_pump_rack), tostring(fake_reload_pump_eject), tostring(fake_reload_ignore_list))
         
         -- debug settings
-        debug_mode = ui_mcm.get("rax_ammo_check/debug_mode")
+        debug_mode = ui_mcm.get("rax_ammo_check/debug/debug_mode")
         
         -- keybind settings
         if mcm_keybinds then
-            mcm_key = ui_mcm.get("rax_ammo_check/keybind")
-            mode = ui_mcm.get("rax_ammo_check/mode") or 0
-            modifier = ui_mcm.get("rax_ammo_check/modifier") or 0
+            mcm_key = ui_mcm.get("rax_ammo_check/keybind/keybind")
+            -- the simple ammo-check key may not be the Reload bind (it would fire on every reload
+            -- and the animations would fight). If the user set it to Reload, snap it back to unbound
+            -- and tell them to use One-Key for reload-triggered checks.
+            if mcm_key and mcm_key ~= DIK_keys.DIK_ESCAPE and dik_to_bind(mcm_key) == key_bindings.kWPN_RELOAD then
+                if ui_mcm.set then ui_mcm.set("rax_ammo_check/keybind/keybind", DIK_keys.DIK_ESCAPE) end
+                mcm_key = DIK_keys.DIK_ESCAPE
+                if db.actor then
+                    actor_menu.set_msg(1, game.translate_string("ui_mcm_rax_ammo_check_keybind_reload_warn"), 5)
+                end
+            end
+            mode = ui_mcm.get("rax_ammo_check/keybind/mode") or 0
+            modifier = ui_mcm.get("rax_ammo_check/keybind/modifier") or 0
             -- on_option_change is the GLOBAL MCM callback (fires on every Apply, any mod),
             -- so unregister BOTH handlers first to avoid stacking duplicate registrations
             -- that would make a single key press fire check_Ammo multiple times.
@@ -2443,11 +2647,71 @@ function check_Ammo(skip_animation)
         end)
         return
     end
-    
+
+    -- Arm the reload-block window. From here check_Ammo plays (or is about to play) an animation;
+    -- while it runs the weapon is non-idle, and on_before_key_press blocks the reload bind until
+    -- the weapon returns to idle. Message-only paths below keep the weapon idle, so they never
+    -- actually block reload even though the window is armed.
+    if block_reload_during_check then
+        ac_anim_block_until = time_global() + AC_ANIM_BLOCK_MS
+        -- Also suppress the Mags Redux reload handler (ret_value alone won't stop it). Deferred one
+        -- tick: the anim-playing flags / non-idle state are set by the branches BELOW, so check them
+        -- next tick and only suppress when an animation actually started (a message-only check keeps
+        -- the weapon idle and must not have Mags reload blocked). Skipped when One-Key is enabled,
+        -- which already owns/suppresses the Reload bind (re-registering Mags would undo that).
+        if not onekey_enabled then
+            RemoveTimeEvent("ac_mags_block", "arm")
+            RemoveTimeEvent("ac_mags_block", "restore")
+            CreateTimeEvent("ac_mags_block", "arm", 0, function()
+                local w = db.actor and db.actor:active_item()
+                if ac_pending_inspect_anim_playing or is_fake_reload
+                   or (w and IsWeapon(w) and w:get_state() ~= 0) then
+                    set_ac_mags_suppressed(true)
+                    -- safety restore if actor_on_hud_animation_end never fires (stuck/cancelled anim)
+                    CreateTimeEvent("ac_mags_block", "restore", AC_ANIM_BLOCK_MS / 1000 + 0.1, function()
+                        set_ac_mags_suppressed(false)
+                        return true
+                    end)
+                end
+                return true
+            end)
+        end
+    end
+
     -- if animations are disabled: just show message with delay
     if not enable_animations then
         print_dbg("Ammo check for %s - animations disabled, showing message only.", sec)
         CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+        return
+    end
+
+    -- Grenade-launcher mode: use a dedicated animation (default: lower weapon) instead of the
+    -- normal inspect / fake-reload path, which plays the confusing grenade-LOAD animation.
+    if in_grenade_mode then
+        print_dbg("Ammo check for %s - grenade mode, grenade_anim_mode=%s.", sec, grenade_anim_mode)
+        if grenade_anim_mode == 1 then
+            -- hide/show weapon
+            ac_pending_slot = actor:active_slot()
+            actor:activate_slot(0)
+            weapon_hidden = true
+            CreateTimeEvent("ammo_check", "restore_weapon", 0, restore_weapon_callback)
+        elseif grenade_anim_mode == 2 then
+            -- fake reload (old behavior: plays the grenade-load animation)
+            do_ammo_check_anim = 1
+            is_fake_reload = true
+            det_active = actor:active_detector() or nil
+            if det_active then det_active:switch_state(2) end
+            play_reload_animation(weapon)
+            CreateTimeEvent("ammo_check", "message_delay", FAKE_RELOAD_MSG_DELAY, delayed_display_callback)
+            CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
+        elseif grenade_anim_mode == 3 then
+            -- message only
+            CreateTimeEvent("ammo_check", "message_delay", 0, delayed_display_callback)
+        else
+            -- 0: lower weapon (default)
+            game.actor_lower_weapon(true)
+            CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+        end
         return
     end
 
