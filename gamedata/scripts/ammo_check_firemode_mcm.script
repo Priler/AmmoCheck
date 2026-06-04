@@ -199,57 +199,46 @@ local function build_dot_plain(mode)
     return s, FM_DOT_ON
 end
 
--- ### Ready or Not indicator (adapted from FireModeCheck by Ishmaeel)
--- Draws a fire-selector graphic from a 256 px tile atlas. Row = weapon selector style
--- (looked up by parent section plus the installed fire-mode upgrade), column = current mode.
--- The selector map and texture are vanilla-Anomaly weapon lists; sections that are not
--- mapped fall back to row 0, which still shows the correct mode in its column.
+-- ### Ready or Not indicator (texture adapted from FireModeCheck by Ishmaeel)
+-- Draws a fire-selector graphic from a 256 px tile atlas. Column = current mode (Single / Burst /
+-- Full-Auto, from GetFireMode); row = selector body, derived in-script from whether the weapon has
+-- a burst position: row 1 (Single/Burst/Auto) when it does, row 2 (Single/Auto) when it does not.
+-- Deriving the row from the weapon's own fire_modes means it works for every weapon, with no
+-- per-gun selector table to maintain (the old vanilla-only list could not cover GAMMA's packs).
 
 local FM_TILE = 256
-local FM_SELECTOR_ROW = {
-    HK_burst3 = 1, HK_no_burst = 2,
-    AK_burst3 = 3, AK_no_burst = 4,
-    AR_burst3 = 5, AR_no_burst = 6,
-}
+local FM_ROW_WITH_BURST = 1     -- selector body that has a burst position
+local FM_ROW_NO_BURST   = 2     -- selector body without a burst position
 
-local fm_defs_ini
-local function fm_get_defs()
-    if not fm_defs_ini then
-        fm_defs_ini = ini_file("rax_ammocheck_firemode.ltx")
+-- does this section's fire_modes list include a burst mode? values are the per-pull round count:
+-- burst is > 1, single is 1, full-auto is -1.
+local function fm_list_has_burst(sec)
+    local modes = parse_list(ini_sys, sec, "fire_modes")
+    if modes then
+        for i = 1, #modes do
+            local v = tonumber(modes[i])
+            if v and v > 1 then return true end
+        end
     end
-    return fm_defs_ini
+    return false
 end
 
--- weapon parent section plus the installed fire-mode upgrade: the [selector_types] key
-local function fm_selector_key(weapon)
-    local root = weapon:section()
-    root = ini_sys:r_string_ex(root, "parent_section") or root
-    local upgrade
+-- weapon or an installed upgrade offers a burst mode
+local function fm_has_burst(weapon)
+    if fm_list_has_burst(weapon:section()) then return true end
+    local found = false
     weapon:iterate_installed_upgrades(function(upgr_sec)
         local prop_sec = ini_sys:r_string_ex(upgr_sec, "section")
-        if prop_sec then
-            local modes = parse_list(ini_sys, prop_sec, "fire_modes")
-            if modes and #modes > 1 then
-                upgrade = upgr_sec
-                return true
-            end
+        if prop_sec and fm_list_has_burst(prop_sec) then
+            found = true
+            return true
         end
     end)
-    if upgrade then
-        return root .. "_" .. upgrade
-    end
-    return root
+    return found
 end
 
-local fm_row_cache = {}
 local function fm_indicator_row(weapon)
-    local key = fm_selector_key(weapon)
-    local sel = fm_row_cache[key]
-    if sel == nil then
-        sel = fm_get_defs():r_string_ex("selector_types", key) or false
-        fm_row_cache[key] = sel
-    end
-    return sel and (FM_SELECTOR_ROW[sel] or 0) or 0
+    return fm_has_burst(weapon) and FM_ROW_WITH_BURST or FM_ROW_NO_BURST
 end
 
 local function fm_mode_col(mode)

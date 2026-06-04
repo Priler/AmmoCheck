@@ -25,6 +25,9 @@
     <string id="st_ac_approx">
         <text>Approx.</text>
     </string>
+    <string id="st_ac_chamber">
+        <text>Chamber</text>
+    </string>
     <string id="st_ac_nearly_full">
         <text>Nearly Full</text>
     </string>
@@ -33,6 +36,9 @@
     </string>
     <string id="st_ac_about_half">
         <text>About Half</text>
+    </string>
+    <string id="st_ac_nearly_empty">
+        <text>Nearly empty</text>
     </string>
     <string id="st_ac_less_half">
         <text>Less Than Half</text>
@@ -244,6 +250,12 @@
     </string>
     <string id="ui_mcm_rax_ammo_check_display_show_ammo_tag_desc">
         <text>Append ammo classification tag to the message (e.g. (AP), (HP), (FMJ), (SL), (BK)).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_show_chamber_ammo">
+        <text>Show Chamber Ammo Type</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_show_chamber_ammo_desc">
+        <text>On the "1 in the chamber" messages (only a chambered round left, no or empty magazine), also show what that chambered round is. Needs Magazines Redux with "keep round in chamber" (retain round) enabled.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_display_highlight_ammo_mode">
         <text>Ammo Type Highlight</text>
@@ -463,6 +475,69 @@
     <string id="ui_mcm_menu_rax_ammo_check_onekey">
         <text>Ammo Check - One Key</text>
     </string>
+    <string id="ui_mm_title_rax_ammo_check_fastreload">
+        <text>Fast Reload</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_desc">
+        <text>Hold a modifier and press Reload for a faster reload that DROPS the old magazine on the ground instead of keeping it (a tactical speed reload).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_mags_note">
+        <text>Only works with the Magazines mod (Anomaly Magazines Redux).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_enable">
+        <text>Enable Fast Reload</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_enable_desc">
+        <text>Master switch for the fast reload shortcut. OFF by default. Stands down while One-Key Weapon Controls is enabled (it owns the Reload key).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_modifier">
+        <text>Fast Reload Modifier</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_modifier_desc">
+        <text>Hold this modifier together with the Reload key to do a fast reload. A plain Reload (no modifier) stays normal.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_speed_mult">
+        <text>Reload Speed</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_speed_mult_desc">
+        <text>Animation speed multiplier for the fast reload (1.25 = 25% faster). Kept modest because the reload sound is not sped up with it.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_keep_last_mag">
+        <text>Keep Last Magazine</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_keep_last_mag_desc">
+        <text>Block the fast reload when you have no other magazine equipped, so you never throw away your only one. With this off, a fast reload with no spare will still drop the loaded mag. A normal reload is unaffected.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_throw_direction">
+        <text>Throw Direction</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_throw_direction_desc">
+        <text>Which way the dropped magazine is tossed, relative to where you are facing. "Drop" disables the toss (mag just falls at your feet).</text>
+    </string>
+    <string id="rax_ammo_check_fastreload_throw_direction_lst_td_drop">
+        <text>Drop (no throw)</text>
+    </string>
+    <string id="rax_ammo_check_fastreload_throw_direction_lst_td_forward">
+        <text>Forward</text>
+    </string>
+    <string id="rax_ammo_check_fastreload_throw_direction_lst_td_right">
+        <text>Right</text>
+    </string>
+    <string id="rax_ammo_check_fastreload_throw_direction_lst_td_left">
+        <text>Left</text>
+    </string>
+    <string id="rax_ammo_check_fastreload_throw_direction_lst_td_back">
+        <text>Backward</text>
+    </string>
+    <string id="rax_ammo_check_fastreload_throw_direction_lst_td_down">
+        <text>Down</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_throw_force">
+        <text>Throw Force</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_throw_force_desc">
+        <text>How hard the magazine is thrown (0 = plain drop, 100 = strong toss). Has no effect when Throw Direction is set to Drop.</text>
+    </string>
     <string id="ui_mm_title_rax_ammo_check_onekey">
         <text>One Key Weapon Controls</text>
     </string>
@@ -504,6 +579,9 @@
     </string>
     <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_reload">
         <text>Reload</text>
+    </string>
+    <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_fast_reload">
+        <text>Fast Reload (drop old mag)</text>
     </string>
     <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_next">
         <text>Next Ammo Type</text>
@@ -565,7 +643,7 @@
         <text>Fire Mode Display Style</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_display_style_desc">
-        <text>How to show the fire mode. Text: word labels. None: nothing (pair with Display Fire Mode Letter to show just the letter). Dots: four dots, white for active and dark for empty (single 1, burst N, full-auto 4). Dots alt.: only the white active dots, no padding. Ready or Not: a fire-selector graphic (with baked mode text). Ready or Not (no text): the same graphic without the text. Color ON draws it red, OFF white. The two-tone dark dots need Custom Text Rendering; without it empty dots show as 'o'. The Ready or Not selector list is built for vanilla Anomaly weapons; unlisted weapons still show the correct mode on a default selector.</text>
+        <text>How to show the fire mode. Text: word labels. None: nothing (pair with Display Fire Mode Letter to show just the letter). Dots: four dots, white for active and dark for empty (single 1, burst N, full-auto 4). Dots alt.: only the white active dots, no padding. Ready or Not: a fire-selector graphic (with baked mode text). Ready or Not (no text): the same graphic without the text. Color ON draws it red, OFF white. The two-tone dark dots need Custom Text Rendering; without it empty dots show as 'o'. The Ready or Not selector body (with or without a burst position) is derived from the weapon's own fire modes, so it works for any weapon.</text>
     </string>
     <string id="rax_ammo_check_firemode_display_style_lst_ds_text">
         <text>Text</text>

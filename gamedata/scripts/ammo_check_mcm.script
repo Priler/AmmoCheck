@@ -86,6 +86,7 @@ local mcm_key = DIK_keys.DIK_F
 local msg_duration = 2
 local show_ammo_type = false
 local show_ammo_tag = true
+local show_chamber_ammo = false  -- expand the "+1" message with the chambered round's type (retain_round)
 local busy_hands_delay = 1
 local no_magazine_fallback = 1  -- 0: hide/show, 1: lower, 2: none (for Fake Reload mode when no mag loaded)
 local fake_reload_fallback = 1  -- 0: hide/show, 1: lower (for internal mag weapons)
@@ -459,48 +460,26 @@ function on_before_key_press(key, bind, dis, flags)
     end
 end
 
+-- Debug numpad keys live in their OWN on_key_press handler, registered once in on_game_start and
+-- never touched by the key-mode (un)register dance below. The mode-specific on_key_press handler is
+-- unregistered in Hold mode (default), which would otherwise kill these keys.
+function on_key_press_debug(key)
+    if not debug_mode then return end
+    if numpad_states[key] then
+        debug_test_state(numpad_states[key])
+        return
+    end
+    if key == DIK_keys.DIK_MULTIPLY then debug_list_animations() return end   -- numpad * lists animations
+    if key == DIK_keys.DIK_ADD      then debug_adjust_delay(0.1) return end   -- numpad + increases delay
+    if key == DIK_keys.DIK_SUBTRACT then debug_adjust_delay(-0.1) return end  -- numpad - decreases delay
+    if key == DIK_keys.DIK_DIVIDE   then debug_play_animation("anm_bore") return end  -- numpad / anm_bore
+    if key == DIK_keys.DIK_DECIMAL  then debug_play_animation("anm_idle") return end  -- numpad . anm_idle
+end
+
 function on_key_press(key)
     local bind = dik_to_bind(key)
     if weapon_hidden and not direction_keys[bind] then
         weapon_hidden = false
-    end
-
-    -- debug mode: numpad keys 0-9 test weapon states
-    if debug_mode then
-        if numpad_states[key] then
-            debug_test_state(numpad_states[key])
-            return
-        end
-        
-        -- numpad * lists animations
-        if key == DIK_keys.DIK_MULTIPLY then
-            debug_list_animations()
-            return
-        end
-        
-        -- numpad + increases animation delay
-        if key == DIK_keys.DIK_ADD then
-            debug_adjust_delay(0.1)
-            return
-        end
-        
-        -- numpad - decreases animation delay
-        if key == DIK_keys.DIK_SUBTRACT then
-            debug_adjust_delay(-0.1)
-            return
-        end
-        
-        -- numpad / plays anm_bore
-        if key == DIK_keys.DIK_DIVIDE then
-            debug_play_animation("anm_bore")
-            return
-        end
-        
-        -- numpad . plays anm_idle
-        if key == DIK_keys.DIK_DECIMAL then
-            debug_play_animation("anm_idle")
-            return
-        end
     end
 
     -- One-Key owns ammo-check (via key hold); ignore the standalone ammo-check key while it is on
@@ -1021,9 +1000,10 @@ local function classify_ammo_by_name(ammo_name)
     
     local name_lower = string_lower(ammo_name)
     
-    -- HP variants
+    -- HP variants (LRN / LRNPC lead round-nose tagged HP)
     if string_match(name_lower, " hp$") or string_match(name_lower, "hp$")
-       or string_find(name_lower, "jhp") or string_find(name_lower, "hydro") then
+       or string_find(name_lower, "jhp") or string_find(name_lower, "hydro")
+       or string_find(name_lower, "lrn") then
         return "hp", "(HP)"
     end
     
@@ -1073,9 +1053,10 @@ local function classify_ammo_by_name(ammo_name)
         return "buck", "(BK)"
     end
     
-    -- FMJ/Standard
+    -- FMJ/Standard (PST ball tagged FMJ; exclude PSTM so the modernized round isn't swept in)
     if string_find(name_lower, "fmj") or string_find(name_lower, "ball")
-       or string_match(name_lower, " ps$") or string_match(name_lower, " p$") then
+       or string_match(name_lower, " ps$") or string_match(name_lower, " p$")
+       or (string_find(name_lower, "pst") and not string_find(name_lower, "pstm")) then
         return "fmj", "(FMJ)"
     end
     
@@ -1138,9 +1119,10 @@ local function format_ammo_type_string(display_round, tag_round)
     if show_ammo_tag and tag then
         -- tag is enabled - highlight applies to tag
         if highlight_ammo_mode == 2 then
-            -- separate lines: ammo name on line 1, tag on line 2
-            result = ammo_name_display or ""
-            separate_tag = tag
+            -- separate lines: keep line 1 as the level message; put BOTH the ammo name and tag
+            -- together on line 2 (same chunk as combined mode, just on its own line)
+            result = ""
+            separate_tag = ammo_name_display and (ammo_name_display .. " " .. tag) or tag
         elseif highlight_ammo_mode == 3 then
             -- combined: full chunk (name + tag) carried as the colored part
             result = ""
@@ -1168,12 +1150,16 @@ local function format_ammo_type_string(display_round, tag_round)
     return result, ammo_type, separate_tag
 end
 
--- Tarkov-like rough count: round to the nearest 5, clamped to [5, max]. The full case is handled
--- by the caller (shows "Full"), so this only runs for partial magazines.
+-- Tarkov-like rough count: round to the nearest 5, then clamp to [5, max-5] so a nearly-full mag
+-- never reads at or near the true max (e.g. 29/30 -> 25, 59/60 -> 55). The full case is handled by
+-- the caller (shows "Full"). For tiny mags where max-5 would drop below the 5 floor, fall back to
+-- max as the ceiling so the number stays sane.
 local function ammo_approx(current, max)
     local a = math_floor((current + 2.5) / 5) * 5
     if a < 5 then a = 5 end
-    if a > max then a = max end
+    local hi = max - 5
+    if hi < 5 then hi = max end
+    if a > hi then a = hi end
     return a
 end
 
@@ -1191,9 +1177,18 @@ local function format_ammo_message(text_msg, current, max, display_round, tag_ro
         -- numeric only
         result = string_format("%d/%d", current, max)
     elseif display_mode == 3 then
-        -- Tarkov-like: a rough count, or "Full" when topped off / over
+        -- Tarkov-like: "Full" when topped off, "Nearly empty" with only a few rounds, "About Half"
+        -- around the midpoint, else a rough count (capped at max-5 so a near-full mag never reads max).
+        -- Nearly-empty threshold is a few rounds, but bounded to a quarter of the mag so tiny mags
+        -- (revolvers, tubes) don't read "Nearly empty" when they are actually fairly full.
+        local near_thresh = math_min(5, math_floor(max * 0.25))
+        if near_thresh < 1 then near_thresh = 1 end
         if current >= max then
             result = get_translation("st_ac_full")
+        elseif current <= near_thresh then
+            result = get_translation("st_ac_nearly_empty")
+        elseif current > max * 0.4 and current <= max * 0.6 then
+            result = get_translation("st_ac_about_half")
         else
             result = get_translation("st_ac_approx") .. " " .. tostring(ammo_approx(current, max))
         end
@@ -1218,6 +1213,16 @@ local function format_ammo_message(text_msg, current, max, display_round, tag_ro
     end
     
     return result, ammo_type, separate_tag
+end
+
+-- the chambered round's short name + ammo tag, for the "+1 in chamber" expansion
+local function format_chamber_string(chamber_round)
+    if not chamber_round then return nil end
+    local cn = gc(ui_item.get_sec_short_name(chamber_round))
+    if not cn or cn == "" then return nil end
+    -- local _, ctag = classify_ammo_by_name(cn)
+    -- if ctag then return cn .. " " .. ctag end
+    return cn
 end
 
 -- shared ammo status calculation
@@ -1325,7 +1330,8 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
             clr = use_clr and clr03_Amber or clr06_White
 
         elseif is_chamber_only then
-            -- Chamber only - don't show ammo type/tag
+            -- Chamber only - the "1 in the chamber" messages. This is where the optional chamber
+            -- ammo type belongs (not on "Full + 1" / level messages).
             if has_empty_mag then
                 message = get_translation("st_ac_empty_mag_oitc")
                 msg_key = "st_ac_empty_mag_oitc"
@@ -1334,6 +1340,13 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
                 msg_key = "st_ac_no_mag_oitc"
             end
             clr = use_clr and clr00_Red or clr06_White
+            if show_chamber_ammo then
+                local chamber_sec = (get_sec_chambered and get_sec_chambered(weapon)) or get_vanilla_ammo_section(weapon)
+                local cstr = format_chamber_string(chamber_sec)
+                if cstr then
+                    message = message .. string_format(" (%s)", cstr)
+                end
+            end
             
         else
             -- calculate index based on percentage
@@ -1597,7 +1610,7 @@ local function mag_check_animation(anm_table, obj)
         wpn_checking = obj
         local sec = obj:section()
 
-        local is_supported = is_supported_weapon(sec)
+        local is_supported = is_supported_weapon(obj)
         local has_mag_data = get_mag_loaded(obj:id())
         local ammo_in_mag = obj:get_ammo_in_magazine()
 
@@ -1670,6 +1683,7 @@ function on_game_start()
     RegisterScriptCallback("actor_on_first_update", actor_on_first_update)
     RegisterScriptCallback("on_option_change", on_option_change)
     RegisterScriptCallback("on_key_press", on_key_press)
+    RegisterScriptCallback("on_key_press", on_key_press_debug)  -- always-on debug keys (mode-independent)
     RegisterScriptCallback("on_before_key_press", on_before_key_press)
     RegisterScriptCallback("actor_on_hud_animation_end", actor_on_hud_animation_end)
     RegisterScriptCallback("actor_on_weapon_jammed", actor_on_weapon_jammed)
@@ -1848,6 +1862,7 @@ function on_mcm_load()
                 { id = "render_cursor_gap", type = "track", val = 2, min = 0, max = 300, step = 10, def = 80 },
                 { id = "show_ammo_type", type = "check", val = 1, def = false },
                 { id = "show_ammo_tag", type = "check", val = 1, def = true },
+                { id = "show_chamber_ammo", type = "check", val = 1, def = false },
                 { id = "highlight_ammo_mode", type = "list", val = 2, def = 0,
                     content = { { 0, "ham_none" }, { 1, "ham_whole" }, { 2, "ham_separate" }, { 3, "ham_combined" } }
                 },
@@ -1943,13 +1958,30 @@ function on_mcm_load()
                     content = { { 1, "mcm_kb_mod_shift" }, { 2, "mcm_kb_mod_ctrl" }, { 3, "mcm_kb_mod_alt" } }
                 },
                 { id = "doubletap_behavior", type = "list", val = 0, def = "situational",
-                    content = { { "none", "dt_none" }, { "reload", "dt_reload" }, { "next_ammo_type", "dt_next" }, { "ammo_wheel", "dt_wheel" }, { "situational", "dt_situational" } }
+                    content = { { "none", "dt_none" }, { "reload", "dt_reload" }, { "fast_reload", "dt_fast_reload" }, { "next_ammo_type", "dt_next" }, { "ammo_wheel", "dt_wheel" }, { "situational", "dt_situational" } }
                 },
                 { id = "hold_ms", type = "track", val = 2, min = 100, max = 600, step = 25, def = 200 },
                 { id = "doubletap_ms", type = "track", val = 2, min = 50, max = 500, step = 25, def = 200 },
                 { id = "desc_update_mcm", type = "desc", text = "ui_mcm_rax_ammo_check_onekey_update_mcm", clr = { 255, 175, 0, 0 },
                     precondition = { function() return not mcm_keybinds end }
                 },
+            }},
+
+            -- ### Fast Reload (logic lives in ammo_check_fastreload_mcm.script)
+            { id = "fastreload", sh = true, text = "ui_mm_title_rax_ammo_check_fastreload", gr = {
+                { id = "slide_fastreload", type = "slide", link = "ui_options_slider_player", text = "ui_mm_title_rax_ammo_check_fastreload", size = { 512, 50 }, spacing = 20 },
+                { id = "info_desc", type = "desc", text = "ui_mcm_rax_ammo_check_fastreload_desc" },
+                { id = "mags_note", type = "desc", text = "ui_mcm_rax_ammo_check_fastreload_mags_note", clr = { 255, 175, 0, 0 } },
+                { id = "enable", type = "check", val = 1, def = false },
+                { id = "modifier", type = ui_mcm.kb_mod_radio, val = 2, def = 1,
+                    content = { { 1, "mcm_kb_mod_shift" }, { 2, "mcm_kb_mod_ctrl" }, { 3, "mcm_kb_mod_alt" } }
+                },
+                { id = "speed_mult", type = "track", val = 2, min = 1, max = 1.5, step = 0.05, def = 1.25 },
+                { id = "keep_last_mag", type = "check", val = 1, def = true },
+                { id = "throw_direction", type = "list", val = 0, def = "forward",
+                    content = { { "drop", "td_drop" }, { "forward", "td_forward" }, { "right", "td_right" }, { "left", "td_left" }, { "backward", "td_back" }, { "down", "td_down" } }
+                },
+                { id = "throw_force", type = "track", val = 2, min = 0, max = 100, step = 5, def = 40 },
             }},
 
             -- ### Debug
@@ -1996,6 +2028,8 @@ function on_option_change()
         if show_ammo_type == nil then show_ammo_type = true end
         show_ammo_tag = ui_mcm.get("rax_ammo_check/display/show_ammo_tag")
         if show_ammo_tag == nil then show_ammo_tag = true end
+        local chamber_val = ui_mcm.get("rax_ammo_check/display/show_chamber_ammo")
+        show_chamber_ammo = (chamber_val == true or chamber_val == 1)  -- default false
         highlight_ammo_mode = ui_mcm.get("rax_ammo_check/display/highlight_ammo_mode") or 0
         print_dbg("Ammo settings: show_type=%s, show_tag=%s, highlight_mode=%s", tostring(show_ammo_type), tostring(show_ammo_tag), tostring(highlight_ammo_mode))
         msg_duration = ui_mcm.get("rax_ammo_check/display/msg_duration") or 2
@@ -2783,12 +2817,14 @@ function check_Ammo(skip_animation)
 
     -- [ A) weapon HAS proper mag inspect animation ]--
     if has_proper_inspect then
-        -- check if we need to apply no_magazine_fallback
-        local uses_magazines = magazines and is_supported_weapon(sec)
+        -- check if we need to apply no_magazine_fallback. Pass the weapon OBJECT (not the section)
+        -- to is_supported_weapon: with only a section it skips the real base-type check and can
+        -- wrongly report unsupported, which would suppress the no-mag handling entirely.
+        local uses_magazines = magazines and is_supported_weapon(weapon)
         local needs_no_mag_fallback = false
-        
+
         if uses_magazines then
-            local has_detachable_mag = magazine_binder and magazine_binder.weapon_default_magazine and 
+            local has_detachable_mag = magazine_binder and magazine_binder.weapon_default_magazine and
                                        magazine_binder.weapon_default_magazine(weapon)
             if has_detachable_mag then
                 local current_magazine = get_mag_loaded(weaponId)
@@ -2797,7 +2833,16 @@ function check_Ammo(skip_animation)
                 end
             end
         end
-        
+
+        -- No magazine, but the weapon ships a dedicated no-mag inspect (anm_ammo_check_no_mag):
+        -- play that animation instead of the fallback. Fall through to the native inspect path; the
+        -- mutator picks the _no_mag variant. The fallback only applies when no such animation exists,
+        -- so the regular mag-check animation never plays when there is no magazine to check.
+        if needs_no_mag_fallback and has_animation(sec, "anm_ammo_check_no_mag") then
+            print_dbg("Ammo check for %s - no mag but has anm_ammo_check_no_mag, playing it (ignoring no_magazine_fallback).", sec)
+            needs_no_mag_fallback = false
+        end
+
         if needs_no_mag_fallback then
             -- weapon has proper inspect but NO magazine - cancel animation and apply fallback
             print_dbg("Ammo check for %s - has proper inspect but no mag, cancelling and using no_magazine_fallback=%s.", sec, no_magazine_fallback)
@@ -2886,8 +2931,9 @@ function check_Ammo(skip_animation)
             return
         end
         
-        -- check if weapon uses detachable magazines (MagsRedux supported)
-        local uses_magazines = magazines and is_supported_weapon(sec)
+        -- check if weapon uses detachable magazines (MagsRedux supported). Pass the weapon object,
+        -- not the section: a section-only query skips the base-type check and can misreport support.
+        local uses_magazines = magazines and is_supported_weapon(weapon)
         
         if uses_magazines then
             -- check if this is a DETACHABLE magazine weapon vs INTERNAL magazine (tube, etc.)

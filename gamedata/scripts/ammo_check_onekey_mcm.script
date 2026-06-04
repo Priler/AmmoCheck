@@ -162,6 +162,14 @@ local function do_doubletap_action(weapon)
         switch_ammo_wheel()
     elseif mcm_doubletap_behavior == "next_ammo_type" then
         switch_ammo_next()
+    elseif mcm_doubletap_behavior == "fast_reload" then
+        -- arm the fast-reload speed-up + old-mag drop (if this is a mag weapon with a mag), then
+        -- perform the reload ourselves (One-Key owns the Reload bind). Falls back to a normal reload
+        -- when not applicable (no mags mod / no mag / unsupported), since the arm is a no-op there.
+        if ammo_check_fastreload_mcm and ammo_check_fastreload_mcm.do_fast_reload then
+            ammo_check_fastreload_mcm.do_fast_reload(weapon)
+        end
+        try_reload_weapon()
     else
         try_reload_weapon()
     end
@@ -219,13 +227,39 @@ function on_before_key_press(key, bind, dis, flags)
         return
     end
 
-    if is_ammo_wheel_open() or weapon:get_state() ~= 0 then
+    -- ammo wheel UI is open: let it have the key
+    if is_ammo_wheel_open() then
         flags.ret_value = true
+        return
+    end
+
+    -- weapon busy (firing / animating). We have unregistered the Mags Redux reload handler, so if
+    -- we passed the key through here the ENGINE native reload would fire - and on a mags-supported
+    -- weapon that is a ghost reload: it loads phantom rounds straight from loose inventory ammo even
+    -- when no magazine is available. Consume the press and ignore it; the player reloads when idle.
+    if weapon:get_state() ~= 0 then
+        flags.ret_value = false
         return
     end
 
     -- we own this press from here on
     flags.ret_value = false
+
+    -- Fast Reload via modifier: immediate, bypassing the tap/double-tap/hold state machine. When the
+    -- Fast Reload feature is enabled and its modifier is held, claim this press for a fast reload
+    -- right now (no double-tap defer). One-Key owns the bind here, so we run the reload ourselves.
+    -- Skipped when the double-tap action IS fast reload: that makes double-tap the chosen trigger, so
+    -- the modifier + reload-key behaviour is ignored to avoid two ways firing the same thing.
+    if mcm_doubletap_behavior ~= "fast_reload"
+       and ammo_check_fastreload_mcm and ammo_check_fastreload_mcm.try_modifier_fast_reload
+       and ammo_check_fastreload_mcm.try_modifier_fast_reload(weapon) then
+        okr_clear_pending()
+        okr_last_press_t = 0
+        okr_down_t = 0
+        okr_hold_fired = false
+        try_reload_weapon()
+        return
+    end
 
     local now = time_global()
 

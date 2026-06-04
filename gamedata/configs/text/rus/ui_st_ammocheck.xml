@@ -25,6 +25,9 @@
     <string id="st_ac_approx">
         <text>Прибл.</text>
     </string>
+    <string id="st_ac_chamber">
+        <text>Патронник</text>
+    </string>
     <string id="st_ac_nearly_full">
         <text>Почти полный</text>
     </string>
@@ -33,6 +36,9 @@
     </string>
     <string id="st_ac_about_half">
         <text>Около половины</text>
+    </string>
+    <string id="st_ac_nearly_empty">
+        <text>Почти пусто</text>
     </string>
     <string id="st_ac_less_half">
         <text>Меньше половины</text>
@@ -238,6 +244,12 @@
     </string>
     <string id="ui_mcm_rax_ammo_check_display_show_ammo_tag_desc">
         <text>Добавлять метку классификации патронов: (AP), (HP), (FMJ), (SL), (BK).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_show_chamber_ammo">
+        <text>Показывать тип патрона в патроннике</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_show_chamber_ammo_desc">
+        <text>На сообщениях "1 в патроннике" (остался только патрон в патроннике, без магазина или с пустым), также показывать, какой это патрон. Требует Magazines Redux с включённой опцией "оставлять патрон в патроннике".</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_display_highlight_ammo_mode">
         <text>Подсветка типа патронов</text>
@@ -455,6 +467,69 @@
     <string id="ui_mcm_menu_rax_ammo_check_onekey">
         <text>Проверка боезапаса - Одна клавиша</text>
     </string>
+    <string id="ui_mm_title_rax_ammo_check_fastreload">
+        <text>Быстрая перезарядка</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_desc">
+        <text>Удерживайте модификатор и нажмите Перезарядку для ускоренной перезарядки, которая ВЫБРАСЫВАЕТ старый магазин на землю, а не оставляет его (тактическая быстрая перезарядка).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_mags_note">
+        <text>Работает только с модом на магазины (Anomaly Magazines Redux).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_enable">
+        <text>Включить быструю перезарядку</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_enable_desc">
+        <text>Главный переключатель быстрой перезарядки. По умолчанию ВЫКЛ. Отключается, пока включён One-Key Weapon Controls (он управляет клавишей Перезарядки).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_modifier">
+        <text>Модификатор быстрой перезарядки</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_modifier_desc">
+        <text>Удерживайте этот модификатор вместе с клавишей Перезарядки для быстрой перезарядки. Обычная Перезарядка (без модификатора) остаётся обычной.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_speed_mult">
+        <text>Скорость перезарядки</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_speed_mult_desc">
+        <text>Множитель скорости анимации быстрой перезарядки (1.25 = на 25% быстрее). Оставлен умеренным, так как звук перезарядки не ускоряется вместе с ней.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_keep_last_mag">
+        <text>Сохранять последний магазин</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_keep_last_mag_desc">
+        <text>Запрещает быструю перезарядку, когда у вас нет другого снаряжённого магазина, чтобы вы не выбросили единственный. Если отключено, быстрая перезарядка без запасного магазина всё равно сбросит заряженный. Обычная перезарядка не затрагивается.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_throw_direction">
+        <text>Направление выброса</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_throw_direction_desc">
+        <text>В какую сторону выбрасывается сброшенный магазин относительно вашего взгляда. "Уронить" отключает бросок (магазин просто падает под ноги).</text>
+    </string>
+    <string id="rax_ammo_check_fastreload_throw_direction_lst_td_drop">
+        <text>Уронить (без броска)</text>
+    </string>
+    <string id="rax_ammo_check_fastreload_throw_direction_lst_td_forward">
+        <text>Вперёд</text>
+    </string>
+    <string id="rax_ammo_check_fastreload_throw_direction_lst_td_right">
+        <text>Вправо</text>
+    </string>
+    <string id="rax_ammo_check_fastreload_throw_direction_lst_td_left">
+        <text>Влево</text>
+    </string>
+    <string id="rax_ammo_check_fastreload_throw_direction_lst_td_back">
+        <text>Назад</text>
+    </string>
+    <string id="rax_ammo_check_fastreload_throw_direction_lst_td_down">
+        <text>Вниз</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_throw_force">
+        <text>Сила броска</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_throw_force_desc">
+        <text>Насколько сильно выбрасывается магазин (0 = просто уронить, 100 = сильный бросок). Не действует, если Направление выброса установлено на "Уронить".</text>
+    </string>
     <string id="ui_mm_title_rax_ammo_check_onekey">
         <text>Управление оружием одной клавишей</text>
     </string>
@@ -496,6 +571,9 @@
     </string>
     <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_reload">
         <text>Перезарядка</text>
+    </string>
+    <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_fast_reload">
+        <text>Быстрая перезарядка (сброс старого магазина)</text>
     </string>
     <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_next">
         <text>Следующий тип патронов</text>
@@ -557,7 +635,7 @@
         <text>Стиль отображения режима огня</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_display_style_desc">
-        <text>Как показывать режим огня. Текст: словами. Нет: ничего (включите "Показывать букву режима", чтобы показать только букву). Точки: четыре точки, белые - активные, тёмные - пустые (одиночный 1, очередь N, авто 4). Точки альт.: только белые активные точки, без заполнения. Ready or Not: графика переключателя огня внизу экрана. Список Ready or Not рассчитан на ванильное оружие Anomaly; для неизвестного оружия режим всё равно отображается на стандартном переключателе. Ready or Not (без текста): та же графика, но без текста. Вкл - красная, Выкл - белая.</text>
+        <text>Как показывать режим огня. Текст: словами. Нет: ничего (включите "Показывать букву режима", чтобы показать только букву). Точки: четыре точки, белые - активные, тёмные - пустые (одиночный 1, очередь N, авто 4). Точки альт.: только белые активные точки, без заполнения. Ready or Not: графика переключателя огня внизу экрана. Ready or Not (без текста): та же графика, но без текста. Вкл - красная, Выкл - белая. Корпус переключателя Ready or Not (с позицией очереди или без) определяется по режимам огня самого оружия, поэтому работает для любого оружия.</text>
     </string>
     <string id="rax_ammo_check_firemode_display_style_lst_ds_text">
         <text>Текст</text>
