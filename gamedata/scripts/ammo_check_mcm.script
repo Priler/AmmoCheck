@@ -24,10 +24,10 @@
 --   - Added "Eject round on bolt cyrcle" option
 --   - Added "Eject shell on pump slide" option
 
---  @TODO:
---   - No magazine fallback only works for weapons without mag inspect animation
---   - (reason: I dunno how to cancel mag inspect animation, as well as how to cancel camera movement animation alongside it)
---   - (so if anyone know how to do it, write me (issues on GH would be good, or comment on ModDB))
+--  Note: No-magazine fallback also works for weapons WITH a mag inspect animation now. The engine
+--  inspect (triggered by the ammo-check key) cannot be cancelled once started, so instead it is
+--  pre-empted: on_before_key_press consumes the key when the no-mag fallback applies, so the inspect
+--  never starts and only the fallback (lower/hide) plays. See ac_should_block_inspect_no_mag.
 
 --[[
     Performance optimizations (LUA *magic*):
@@ -62,6 +62,7 @@ local show_message = true       -- show ammo message after check; false = animat
 local hide_msg_on_inspect = false -- when true, suppress message only when a real anm_ammo_check is playing
 local ac_pending_inspect_anim_playing = false  -- state flag: true when path A lets the native inspect anim run; gates hide_msg_on_inspect. MUST be declared above display_ammo_status so its upvalue capture sees this local (Lua resolves names at function-definition time).
 local ac_inspect_pending = false  -- arms the mutator to override engine's anm_bore -> anm_ammo_check[_empty|_no_mag] in path A only. Distinct from do_ammo_check_anim so fake-reload paths (which use play_hud_motion) don't have their explicit anim_name rewritten by the mutator.
+local ac_suppress_inspect_until = 0  -- time_global() (ms) window during which the mutator neutralizes the engine's AUTO mag-check bore (anm_ammo_check[_empty]) to a plain idle. Set when the no-magazine fallback runs: GAMMA's engine plays the mag-check bore on its own, so the fallback (lower/hide) must also suppress that inspect or it plays on top.
 local ac_cooldown_until = 0  -- time_global() value (ms) when the ammo-check-key cooldown expires. Fixed AC_COOLDOWN_MS window from when check_Ammo commits. Subsequent key presses for the SAME weapon while still in cooldown are ignored.
 local ac_last_weapon_id = 0  -- weapon id the previous check was for. If the player switches weapons, the next key press resets cooldown + hides stale text and proceeds with the new weapon.
 local ac_message_until = 0   -- time_global() value (ms) when the displayed message visually disappears. Tracked separately from cooldown because msg_duration (1-5s) may outlive the cooldown (3s) - we hide the stale message before processing the next press.
@@ -78,6 +79,7 @@ local block_reload_during_check = true  -- MCM: prevent the reload key from inte
 local ac_mags_suppressed = false  -- true while we have unregistered the Mags Redux reload handler for the block window
 local onekey_enabled = false      -- cached: One-Key owns/suppresses the Reload bind itself, so we must not also touch the Mags handler
 local use_clr = true
+local color_ammo_type = true  -- when false, ammo type/tag stay white even with Colored Messages on
 local hide_counter = true
 local hide_ammo_icon = true
 local anim_mode = 2             -- 0: default (hide/show), 1: lower weapon, 2: fake reload
@@ -87,6 +89,7 @@ local msg_duration = 2
 local show_ammo_type = false
 local show_ammo_tag = true
 local show_chamber_ammo = false  -- expand the "+1" message with the chambered round's type (retain_round)
+local show_chamber_mismatch = false  -- on "Full + 1", also show the chambered round's type when it differs from the magazine top
 local busy_hands_delay = 1
 local no_magazine_fallback = 1  -- 0: hide/show, 1: lower, 2: none (for Fake Reload mode when no mag loaded)
 local fake_reload_fallback = 1  -- 0: hide/show, 1: lower (for internal mag weapons)
@@ -446,6 +449,17 @@ end
 -- running (message-only checks keep it idle and so are never blocked). ret_value=false consumes
 -- the press. One-Key, when enabled, owns the reload bind separately; this is for the default path.
 function on_before_key_press(key, bind, dis, flags)
+    -- No-magazine path-A guard: when an ammo check on the current weapon would use the no-magazine
+    -- fallback (lower/hide), consume the ammo-check key here so the ENGINE weapon-inspect bound to it
+    -- never starts. check_Ammo can only mutate that inspect, not cancel it, so blocking it up front is
+    -- the only way the fallback actually shows. Skipped under One-Key (it owns its own key flow).
+    if not onekey_enabled and mcm_key and mcm_key ~= DIK_keys.DIK_ESCAPE and key == mcm_key then
+        local wpn = db.actor and db.actor:active_item()
+        if wpn and IsWeapon(wpn) and ac_should_block_inspect_no_mag(wpn, wpn:section()) then
+            flags.ret_value = false
+        end
+    end
+
     if time_global() >= ac_anim_block_until then return end  -- window is the master gate
     bind = bind or dik_to_bind(key)
     if bind ~= key_bindings.kWPN_RELOAD then return end
@@ -493,7 +507,10 @@ function on_key_press(key)
         check_Ammo()
         return
     end
-    if ui_mcm.get_mod_key(modifier) then
+    -- modifier 0 means "No Modifier": fire regardless of held keys so checking
+    -- works while running (Shift). get_mod_key(0) would instead require that no
+    -- modifier is held, which blocks the check when Shift/Ctrl/Alt is down.
+    if modifier == 0 or ui_mcm.get_mod_key(modifier) then
         modes[mode]["function"](key)
     end
 end
@@ -503,7 +520,7 @@ function on_key_hold(key)
     if mcm_key == DIK_keys.DIK_ESCAPE then return end  -- unbound
     if key ~= mcm_key then return end
     if dik_to_bind(key) == key_bindings.kWPN_RELOAD then return end  -- reload bind reserved; use One-Key
-    if ui_mcm.get_mod_key(modifier) then
+    if modifier == 0 or ui_mcm.get_mod_key(modifier) then
         modes[mode]["function"](key)
     end
 end
@@ -1215,6 +1232,43 @@ local function format_ammo_message(text_msg, current, max, display_round, tag_ro
     return result, ammo_type, separate_tag
 end
 
+-- strip the wrapping parens from a tag: "(AP)" becomes "AP"
+local function tag_content(tag)
+    if not tag then return nil end
+    return string_match(tag, "%((.+)%)") or tag
+end
+
+-- classify a round, preferring the short name and falling back to the section.
+-- returns: type_key, tag (e.g. "(AP)"), short_name
+local function classify_round(round_sec)
+    if not round_sec then return nil, nil, nil end
+    local name = gc(ui_item.get_sec_short_name(round_sec))
+    if name == "" then name = nil end
+    local atype, tag
+    if name then atype, tag = classify_ammo_by_name(name) end
+    if not tag then atype, tag = classify_ammo_type(round_sec) end
+    return atype, tag, name
+end
+
+-- inline "name tag" chunk for the mismatch "+1" layout, honoring show_ammo_type /
+-- show_ammo_tag. The tag's own parens are dropped because the caller wraps the whole
+-- chunk in one set of parens. returns: chunk_string_or_nil, type_key
+local function format_round_chunk(round_sec)
+    local atype, tag, name = classify_round(round_sec)
+    local tc = tag_content(tag)
+    local show_name = show_ammo_type and name
+    if show_name and show_ammo_tag and tc then
+        name = remove_duplicate_suffix(name, tag)
+        if name and name ~= "" then return name .. " " .. tc, atype end
+        return tc, atype
+    elseif show_name then
+        return name, atype
+    elseif show_ammo_tag and tc then
+        return tc, atype
+    end
+    return nil, atype
+end
+
 -- the chambered round's short name + ammo tag, for the "+1 in chamber" expansion
 local function format_chamber_string(chamber_round)
     if not chamber_round then return nil end
@@ -1225,6 +1279,54 @@ local function format_chamber_string(chamber_round)
     return cn
 end
 
+-- Build the mixed-load line "<level> (<mag>) + 1 (<chamber>)" plus optional colored segments.
+-- The chamber is always one round on top of the magazine fill (retain_round), so this layout
+-- applies at any fill level, not just Full. The mag chunk follows the ammo-type / ammo-tag
+-- toggles; the chamber chunk shows name + tag normally, or only the tag in Tarkov-like mode.
+-- base_clr colors the non-ammo parts (level text, parens, "+ 1"); each ammo name takes its own
+-- type color. Returns: message_string, mag_type_key, segments_or_nil.
+local function compose_mismatch(level, mag_sec, chamber_sec, base_clr)
+    local mag_chunk, mtype = format_round_chunk(mag_sec)
+    local chamber_chunk, ctype
+    if display_mode == 3 then
+        local catype, ctag = classify_round(chamber_sec)
+        ctype = catype
+        chamber_chunk = tag_content(ctag)
+    else
+        chamber_chunk, ctype = format_round_chunk(chamber_sec)
+    end
+
+    local parts = level
+    if mag_chunk and mag_chunk ~= "" then parts = parts .. " (" .. mag_chunk .. ")" end
+    parts = parts .. " + 1"
+    if chamber_chunk and chamber_chunk ~= "" then parts = parts .. " (" .. chamber_chunk .. ")" end
+
+    -- level word in the level color, each ammo name in its own ammo-type color, the static
+    -- parens and "+ 1" white. Needs Colored Messages on and the custom overlay (the actor_menu
+    -- line is single-color, so it keeps the flat path).
+    local segments = nil
+    if use_clr and custom_render then
+        base_clr = base_clr or clr06_White
+        local mag_clr = (color_ammo_type and mag_chunk and get_ammo_type_color(mtype)) or clr06_White
+        local chamber_clr = (color_ammo_type and chamber_chunk and get_ammo_type_color(ctype)) or clr06_White
+        segments = {}
+        segments[#segments + 1] = { str = level, clr = base_clr }
+        if mag_chunk and mag_chunk ~= "" then
+            segments[#segments + 1] = { str = " (", clr = clr06_White }
+            segments[#segments + 1] = { str = mag_chunk, clr = mag_clr }
+            segments[#segments + 1] = { str = ")", clr = clr06_White }
+        end
+        segments[#segments + 1] = { str = " + 1", clr = clr06_White }
+        if chamber_chunk and chamber_chunk ~= "" then
+            segments[#segments + 1] = { str = " (", clr = clr06_White }
+            segments[#segments + 1] = { str = chamber_chunk, clr = chamber_clr }
+            segments[#segments + 1] = { str = ")", clr = clr06_White }
+        end
+    end
+
+    return parts, mtype, segments
+end
+
 -- shared ammo status calculation
 -- returns: message, color, ammo_type, separate_tag
 local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
@@ -1232,6 +1334,7 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
     local clr = nil
     local ammo_type = nil
     local separate_tag = nil
+    local segments = nil  -- per-chunk colored pieces for the mismatch "+1" line (custom render only)
     local msg_key = nil  -- st_ac_* id chosen by the active branch; used by minimalist bar override
     local display_round = nil  -- ammo section for type-name display (function-scoped so the minimalist override can reuse it)
     local tag_round = nil      -- ammo section for tag classification
@@ -1265,6 +1368,7 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
         local base_mag_size = SYS_GetParam(2, sec, "ammo_mag_size", 0)
         local is_chamber_only = false  -- Track if only chambered round remains
         local has_empty_mag = false    -- Track if magazine is inserted but empty
+        local mag_has_chamber = false  -- retain_round: the loaded array carries a chamber round we must exclude from the fill level
 
         if not mag_data and is_supported then
             -- no magazine inserted, one in the chamber
@@ -1275,9 +1379,18 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
         elseif is_supported and mag_data then
             print_dbg("Checking magazine section: %s", mag_data.section)
             max_ammo = SYS_GetParam(2, mag_data.section, "max_mag_size") or 1
-            
+
+            -- the MagsRedux loaded array is the source of truth for round count (it drives
+            -- display_round / chamber too). The engine get_ammo_in_magazine can desync from it
+            -- (mag size mismatch), so trust the array length here, including the +1 chamber.
+            if mag_data.loaded then
+                currentAmmo = #mag_data.loaded
+            end
+
             if magazines_mcm and magazines_mcm.get_config("retain_round") then
-                -- with retain_round: last in array is chambered, second-to-last is magazine top
+                -- with retain_round: last in array is chambered, second-to-last is magazine top.
+                -- the chamber is always present, so the fill level must use (loaded - 1).
+                mag_has_chamber = true
                 local mag_top = mag_data.loaded[#mag_data.loaded - 1]
                 if mag_top then
                     display_round = mag_top
@@ -1311,18 +1424,55 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
 
         -- guard against division by zero
         if not max_ammo or max_ammo <= 0 then max_ammo = 1 end
-        
+
         local curAmmoPerc = currentAmmo / max_ammo
 
+        -- magazine fill excludes the retained chamber round, so a topped-off-onto-chamber state
+        -- (loaded == max+1) is the only "Full"; firing it down to a full count of rounds with one
+        -- in the chamber reads as one short (e.g. 29/30), not Full.
+        local level_count = currentAmmo - (mag_has_chamber and 1 or 0)
+        local level_perc = level_count / max_ammo
+
+        -- resolve the chambered round vs the magazine top for the mismatch layout. retain_round
+        -- keeps the chamber as the last entry of the loaded array; fall back to the engine-chambered
+        -- section. The chamber only counts as a separate "+1" round when retain_round is on.
+        local chamber_sec
+        if mag_data and mag_data.loaded and #mag_data.loaded > 0 then
+            chamber_sec = mag_data.loaded[#mag_data.loaded]
+        end
+        if not chamber_sec then
+            chamber_sec = (get_sec_chambered and get_sec_chambered(weapon)) or get_vanilla_ammo_section(weapon)
+        end
+        local mag_sec = tag_round or display_round
+        local chamber_differs = show_chamber_mismatch and mag_has_chamber
+            and chamber_sec and mag_sec and chamber_sec ~= mag_sec
+
         if currentAmmo == max_ammo + 1 then
-            message, ammo_type, separate_tag = format_ammo_message("st_ac_plus1", currentAmmo, max_ammo, display_round, tag_round)
             msg_key = "st_ac_plus1"
             clr = clr06_White  -- plus1 is always white regardless of use_clr
 
+            if chamber_differs then
+                -- mixed load on a single line: "Full (mag) + 1 (chamber)".
+                local level
+                if display_mode == 1 then
+                    level = string_format("%d/%d", currentAmmo, max_ammo)  -- numeric
+                elseif display_mode == 2 then
+                    level = get_translation("st_ac_full") .. string_format(" %d/%d", currentAmmo, max_ammo)  -- text + numeric
+                else
+                    level = get_translation("st_ac_full")
+                end
+                message, ammo_type, segments = compose_mismatch(level, mag_sec, chamber_sec, clr)
+                separate_tag = nil
+            else
+                message, ammo_type, separate_tag = format_ammo_message("st_ac_plus1", currentAmmo, max_ammo, display_round, tag_round)
+            end
+
         elseif curAmmoPerc > 1 then
-            message, ammo_type, separate_tag = format_ammo_message("st_ac_overfull", currentAmmo, max_ammo, display_round, tag_round)
-            msg_key = "st_ac_overfull"
-            clr = use_clr and clrEE_Purple or clr06_White
+            -- mag reports more than its size param (off-by-N capacity, extended mags, etc.).
+            -- Show it as Full rather than the "Overfilled" state.
+            message, ammo_type, separate_tag = format_ammo_message("st_ac_full", currentAmmo, max_ammo, display_round, tag_round)
+            msg_key = "st_ac_full"
+            clr = clr06_White
 
         elseif currentAmmo == 1 and base_mag_size == 2 then
             message, ammo_type, separate_tag = format_ammo_message("st_ac_just_one", currentAmmo, max_ammo, display_round, tag_round)
@@ -1332,36 +1482,79 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
         elseif is_chamber_only then
             -- Chamber only - the "1 in the chamber" messages. This is where the optional chamber
             -- ammo type belongs (not on "Full + 1" / level messages).
+            local prefix_key
             if has_empty_mag then
                 message = get_translation("st_ac_empty_mag_oitc")
                 msg_key = "st_ac_empty_mag_oitc"
+                prefix_key = "st_ac_empty_mag_prefix"
             else
                 message = get_translation("st_ac_no_mag_oitc")
                 msg_key = "st_ac_no_mag_oitc"
+                prefix_key = "st_ac_no_mag_prefix"
             end
+            local combined = message  -- before the ammo suffix is appended below
             clr = use_clr and clr00_Red or clr06_White
+
+            local cstr, cclr
             if show_chamber_ammo then
                 local chamber_sec = (get_sec_chambered and get_sec_chambered(weapon)) or get_vanilla_ammo_section(weapon)
-                local cstr = format_chamber_string(chamber_sec)
+                cstr = format_chamber_string(chamber_sec)
                 if cstr then
                     message = message .. string_format(" (%s)", cstr)
+                    local ctype = classify_round(chamber_sec)
+                    cclr = (use_clr and color_ammo_type and get_ammo_type_color(ctype)) or clr06_White
                 end
             end
-            
+
+            -- colored split: status prefix ("Empty magazine"/"No magazine") in the level color,
+            -- the static "in the chamber" remainder white, and the chambered round's name in its
+            -- ammo-type color. The remainder is taken from the combined string itself (so the
+            -- locale separator stays correct: " + " in EN, ", " in RU). Custom overlay only.
+            if use_clr and custom_render then
+                local prefix = get_translation(prefix_key)
+                segments = {}
+                if prefix and string_sub(combined, 1, #prefix) == prefix then
+                    segments[#segments + 1] = { str = prefix, clr = clr00_Red }
+                    local remainder = string_sub(combined, #prefix + 1)
+                    if remainder ~= "" then
+                        segments[#segments + 1] = { str = remainder, clr = clr06_White }
+                    end
+                else
+                    segments[#segments + 1] = { str = combined, clr = clr00_Red }
+                end
+                if cstr then
+                    segments[#segments + 1] = { str = " (", clr = clr06_White }
+                    segments[#segments + 1] = { str = cstr, clr = cclr or clr06_White }
+                    segments[#segments + 1] = { str = ")", clr = clr06_White }
+                end
+            end
+
         else
-            -- calculate index based on percentage
+            -- calculate index based on percentage. level_count excludes the retained chamber, so
+            -- a magazine that is full only reads "Full" together with the +1 (handled above).
             -- use ceil so 20% maps to index 2 (near_empty), not index 3 (less_half)
             local idx
-            if currentAmmo == max_ammo then
+            if level_count == max_ammo then
                 idx = #messages -- Full
             else
-                idx = clamp(math_ceil(curAmmoPerc * 10), 1, #messages - 1)
+                idx = clamp(math_ceil(level_perc * 10), 1, #messages - 1)
             end
-            print_dbg("Ammo index: %s (%.1f%%, %d/%d)", idx, curAmmoPerc * 100, currentAmmo, max_ammo)
+            print_dbg("Ammo index: %s (%.1f%%, %d/%d)", idx, level_perc * 100, level_count, max_ammo)
 
-            message, ammo_type, separate_tag = format_ammo_message(messages[idx].m, currentAmmo, max_ammo, display_round, tag_round)
-            msg_key = messages[idx].m
-            clr = use_clr and messages[idx].c or clr06_White
+            local msg_id = messages[idx].m
+            local lvl_clr = use_clr and messages[idx].c or clr06_White
+            msg_key = msg_id
+            clr = lvl_clr
+
+            if chamber_differs then
+                -- mixed load at a partial fill: "<level> (mag) + 1 (chamber)". Build the level text
+                -- with no ammo append (nil rounds), then attach the mag + chamber chunks.
+                local level_text = format_ammo_message(msg_id, level_count, max_ammo, nil, nil)
+                message, ammo_type, segments = compose_mismatch(level_text, mag_sec, chamber_sec, lvl_clr)
+                separate_tag = nil
+            else
+                message, ammo_type, separate_tag = format_ammo_message(msg_id, level_count, max_ammo, display_round, tag_round)
+            end
             print_dbg("Color: use_clr=%s, idx=%s, clr=%s", tostring(use_clr), idx, tostring(clr))
         end
 
@@ -1369,7 +1562,7 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
         -- Only when Colored Messages is enabled. Applies in minimalist bar mode too:
         -- the whole bar takes the ammo-type color (use "Combined" to keep the level color
         -- and color only the type/tag).
-        if use_clr and ammo_type and highlight_ammo_mode == 1 then
+        if use_clr and color_ammo_type and ammo_type and highlight_ammo_mode == 1 then
             local ammo_clr = get_ammo_type_color(ammo_type)
             print_dbg("Highlight override: mode=%s, ammo_type=%s, ammo_clr=%s", highlight_ammo_mode, ammo_type, tostring(ammo_clr))
             if ammo_clr then
@@ -1387,6 +1580,7 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
             message = bar
             ammo_type = nil
             separate_tag = nil
+            segments = nil  -- bar replaces the composed mismatch line; drop its colored segments
 
             -- optionally show ammo type/tag next to the bar (when those MCM options are on
             -- and we actually have a round to classify; chamber-only/jammed/empty have none).
@@ -1414,18 +1608,26 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
         end
     end
 
-    return message, clr, ammo_type, separate_tag
+    return message, clr, ammo_type, separate_tag, segments
 end
 
 -- display ammo status with optional second line
-local function display_ammo_status(message, clr, ammo_type, separate_tag)
+local function display_ammo_status(message, clr, ammo_type, separate_tag, segments)
     if not show_message then return end
     -- hide_msg_on_inspect: suppress message only when path A is letting the native inspect anim play.
     -- All other paths (fake reload, lower, hide/show, auto-check after reload) keep the flag false,
     -- so they still show the message.
     if hide_msg_on_inspect and ac_pending_inspect_anim_playing then return end
 
-    local tag_clr = use_clr and get_ammo_type_color(ammo_type) or clr06_White
+    -- mismatch "+1" line with per-chunk colors: render as side-by-side single-color segments
+    -- (only built when custom render + Colored Messages + a non-None highlight mode).
+    if segments and custom_render then
+        get_ac_overlay():show_segments(segments, msg_duration)
+        ac_message_until = time_global() + math_floor(msg_duration * 1000)
+        return
+    end
+
+    local tag_clr = (use_clr and color_ammo_type and get_ammo_type_color(ammo_type)) or clr06_White
     local base_clr = clr or clr06_White
 
     if custom_render then
@@ -1512,6 +1714,19 @@ end
 -- auto-check after reload
 local pending_reload_check = false
 
+-- Post-reload delay before the auto-check message, shrunk to match a fast reload. The Fast Reload
+-- feature speeds the reload anim, so the fixed AUTO_CHECK_DELAY would feel sluggish after it; divide
+-- by the active fast-reload multiplier (1 when none) so the message keeps pace. Shotgun open/close is
+-- not a fast-reload path, so the getter returns 1 there and the delay is unchanged.
+local function auto_check_delay()
+    local fr = ammo_check_fastreload_mcm
+    if fr and fr.get_fast_reload_speedup then
+        local mult = fr.get_fast_reload_speedup()
+        if mult and mult > 1 then return AUTO_CHECK_DELAY / mult end
+    end
+    return AUTO_CHECK_DELAY -- vagina mulfunction happens here <3
+end
+
 -- callback for auto-check after reload
 local function auto_check_after_reload_callback()
     local actor = db.actor
@@ -1558,7 +1773,7 @@ function actor_on_hud_animation_end(item, section, motion, state, slot)
     if string_find(motion, "^anm_[Rr]eload") then
         pending_reload_check = false
         print_dbg("Reload animation ended: %s", motion)
-        CreateTimeEvent("ammo_check", "auto_check", AUTO_CHECK_DELAY, auto_check_after_reload_callback)
+        CreateTimeEvent("ammo_check", "auto_check", auto_check_delay(), auto_check_after_reload_callback)
         return
     end
 
@@ -1573,7 +1788,7 @@ function actor_on_hud_animation_end(item, section, motion, state, slot)
     if pending_reload_check and string_find(motion, "^anm_[Cc]lose") then
         pending_reload_check = false
         print_dbg("Shotgun reload ended: %s", motion)
-        CreateTimeEvent("ammo_check", "auto_check", AUTO_CHECK_DELAY, auto_check_after_reload_callback)
+        CreateTimeEvent("ammo_check", "auto_check", auto_check_delay(), auto_check_after_reload_callback)
     end
 end
 
@@ -1606,6 +1821,22 @@ local function mag_check_animation(anm_table, obj)
     -- ONLY fires for path A (engine-driven inspect anim). For fake-reload paths the mod
     -- has already chosen the anim explicitly via play_hud_motion - rewriting anm_name
     -- here would hijack that choice (the original bug: anm_reload -> anm_ammo_check).
+    -- No-magazine fallback suppression: GAMMA's engine auto-plays the mag-check bore
+    -- (anm_ammo_check / _empty / _no_mag) when the weapon bores, independent of our mutator. When the
+    -- no-mag fallback is active we do NOT want that inspect, so rewrite it to a plain idle here.
+    if obj and obj:get_state() == 4 and time_global() < ac_suppress_inspect_until then
+        local nm = anm_table and anm_table.anm_name and tostring(anm_table.anm_name)
+        if nm and string.find(nm, "^anm_ammo_check") then
+            -- Replace the engine's auto mag-check bore with the idle animation, so no inspect plays.
+            -- anm_idle loops and would leave the weapon stuck in state 4 (eBore) - the fallback branch
+            -- schedules a forced switch_state(0) to pull it back to idle so further checks aren't
+            -- blocked. The weapon just stays put (no inspect, no shake of the mag-check).
+            anm_table.anm_name = "anm_idle"
+            print_dbg("No-mag fallback: suppressed engine inspect %s -> anm_idle", nm)
+        end
+        return
+    end
+
     if ac_inspect_pending and obj and obj:get_state() == 4 then
         wpn_checking = obj
         local sec = obj:section()
@@ -1661,8 +1892,8 @@ end
 
 -- game initialization
 function on_game_start()
-    -- setup MagsRedux integration
-    if magazine_binder then
+    -- setup MagsRedux integration (needs BOTH modules: some setups provide one without the other)
+    if magazine_binder and magazines then
         get_data = magazine_binder.get_data
         set_data = magazine_binder.set_data
         get_mag_loaded = magazine_binder.get_mag_loaded or get_mag_loaded_shim
@@ -1844,6 +2075,7 @@ function on_mcm_load()
                 { id = "show_message", type = "check", val = 1, def = true },
                 { id = "hide_msg_on_inspect", type = "check", val = 1, def = false },
                 { id = "usecolor", type = "check", val = 1, def = true },
+                { id = "color_ammo_type", type = "check", val = 1, def = true },
                 { id = "color_intensity", type = "track", val = 2, min = 30, max = 100, step = 10, def = 70 },
                 { id = "display_mode", type = "list", val = 2, def = 0,
                     content = { { 0, "dm_text" }, { 1, "dm_numeric" }, { 2, "dm_both" }, { 3, "dm_tarkov" } }
@@ -1863,6 +2095,7 @@ function on_mcm_load()
                 { id = "show_ammo_type", type = "check", val = 1, def = false },
                 { id = "show_ammo_tag", type = "check", val = 1, def = true },
                 { id = "show_chamber_ammo", type = "check", val = 1, def = false },
+                { id = "show_chamber_mismatch", type = "check", val = 1, def = false },
                 { id = "highlight_ammo_mode", type = "list", val = 2, def = 0,
                     content = { { 0, "ham_none" }, { 1, "ham_whole" }, { 2, "ham_separate" }, { 3, "ham_combined" } }
                 },
@@ -1941,6 +2174,7 @@ function on_mcm_load()
                     content = { { "default", "pos_default" }, { "screen_bottom", "pos_bottom" } }
                 },
                 { id = "show_letter", type = "check", val = 1, def = false },
+                { id = "inspect_on_hold", type = "check", val = 1, def = false },
                 { id = "desc_update_mcm", type = "desc", text = "ui_mcm_rax_ammo_check_onekey_update_mcm", clr = { 255, 175, 0, 0 },
                     precondition = { function() return not mcm_keybinds end }
                 },
@@ -1977,11 +2211,14 @@ function on_mcm_load()
                     content = { { 1, "mcm_kb_mod_shift" }, { 2, "mcm_kb_mod_ctrl" }, { 3, "mcm_kb_mod_alt" } }
                 },
                 { id = "speed_mult", type = "track", val = 2, min = 1, max = 1.5, step = 0.05, def = 1.25 },
+                { id = "max_combined_speed", type = "track", val = 2, min = 1, max = 2, step = 0.05, def = 1.5 },
                 { id = "keep_last_mag", type = "check", val = 1, def = true },
                 { id = "throw_direction", type = "list", val = 0, def = "forward",
                     content = { { "drop", "td_drop" }, { "forward", "td_forward" }, { "right", "td_right" }, { "left", "td_left" }, { "backward", "td_back" }, { "down", "td_down" } }
                 },
                 { id = "throw_force", type = "track", val = 2, min = 0, max = 100, step = 5, def = 40 },
+                { id = "slowdown_enable", type = "check", val = 1, def = false },
+                { id = "slowdown_pct", type = "track", val = 2, min = 0, max = 25, step = 1, def = 10 },
             }},
 
             -- ### Debug
@@ -2011,6 +2248,8 @@ function on_option_change()
         local clr_val = ui_mcm.get("rax_ammo_check/display/usecolor")
         -- MCM might return true/false, 1/0, or nil
         use_clr = (clr_val == true or clr_val == 1)
+        local color_ammo_val = ui_mcm.get("rax_ammo_check/display/color_ammo_type")
+        color_ammo_type = (color_ammo_val == true or color_ammo_val == 1 or color_ammo_val == nil)  -- default true
         color_intensity = ui_mcm.get("rax_ammo_check/display/color_intensity") or 70
         update_colors() -- apply color intensity changes
         print_dbg("Settings loaded: use_clr=%s (raw=%s), color_intensity=%s", tostring(use_clr), tostring(clr_val), tostring(color_intensity))
@@ -2030,6 +2269,8 @@ function on_option_change()
         if show_ammo_tag == nil then show_ammo_tag = true end
         local chamber_val = ui_mcm.get("rax_ammo_check/display/show_chamber_ammo")
         show_chamber_ammo = (chamber_val == true or chamber_val == 1)  -- default false
+        local chamber_mismatch_val = ui_mcm.get("rax_ammo_check/display/show_chamber_mismatch")
+        show_chamber_mismatch = (chamber_mismatch_val == true or chamber_mismatch_val == 1)  -- default false
         highlight_ammo_mode = ui_mcm.get("rax_ammo_check/display/highlight_ammo_mode") or 0
         print_dbg("Ammo settings: show_type=%s, show_tag=%s, highlight_mode=%s", tostring(show_ammo_type), tostring(show_ammo_tag), tostring(highlight_ammo_mode))
         msg_duration = ui_mcm.get("rax_ammo_check/display/msg_duration") or 2
@@ -2121,6 +2362,7 @@ local ac_pending_message = nil
 local ac_pending_clr = nil
 local ac_pending_ammo_type = nil
 local ac_pending_separate_tag = nil
+local ac_pending_segments = nil  -- colored segments for the mismatch "+1" line
 local ac_pending_slot = nil  -- for restore_weapon_callback
 -- NOTE: ac_pending_inspect_anim_playing is declared earlier in the file (near the settings block)
 -- because display_ammo_status reads it and is defined much earlier than this block. Lua's
@@ -2129,7 +2371,7 @@ local ac_pending_slot = nil  -- for restore_weapon_callback
 
 -- pre-defined callback for delayed display
 local function delayed_display_callback()
-    display_ammo_status(ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag)
+    display_ammo_status(ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag, ac_pending_segments)
     return true
 end
 
@@ -2147,7 +2389,7 @@ local function restore_weapon_callback()
         return true
     end
     
-    display_ammo_status(ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag)
+    display_ammo_status(ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag, ac_pending_segments)
     actor:activate_slot(ac_pending_slot)
     weapon_hidden = false
     return true
@@ -2402,10 +2644,10 @@ function check_Ammo_silent()
     if not currentAmmo then return end
 
     -- get ammo status using shared function
-    local message, clr, ammo_type, separate_tag = get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
-    
+    local message, clr, ammo_type, separate_tag, segments = get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
+
     -- display directly
-    display_ammo_status(message, clr, ammo_type, separate_tag)
+    display_ammo_status(message, clr, ammo_type, separate_tag, segments)
 end
 
 -- ammo check after reload (for OneKeyReload compatibility)
@@ -2532,6 +2774,39 @@ local function should_exclude_shell_eject(sec)
     return false
 end
 
+-- Decide whether an ammo check on this weapon would fall back to the no-magazine fallback in path A:
+-- weapon has a proper inspect anim (so the ENGINE inspect, triggered by the ammo-check key, would
+-- play), it is mags-supported, has NO magazine, and has no dedicated anm_ammo_check_no_mag. In that
+-- case on_before_key_press consumes the key so the engine inspect never starts - check_Ammo can mutate
+-- that inspect but cannot cancel it, which is why the fallback alone left the inspect animation playing.
+function ac_should_block_inspect_no_mag(weapon, sec)
+    if not enable_animations then return false end
+    if not weapon or not IsWeapon(weapon) then return false end
+    if weapon:weapon_in_grenade_mode() then return false end
+
+    local has_proper_inspect = has_animation(sec, "anm_ammo_check") or
+                               has_animation(sec, "anm_ammo_check_empty") or
+                               has_animation(sec, "anm_ammo_check_no_mag")
+    if not has_proper_inspect then return false end
+
+    -- bolt-action routes that skip path A (mirror check_Ammo)
+    local _bolt_cfg = get_bolt_action_config(sec)
+    if _bolt_cfg and (_bolt_cfg.external_mag or (_bolt_cfg.override_inspect and fake_reload_bolt_cycle)) then
+        return false
+    end
+
+    -- a dedicated no-mag inspect should play, not the fallback
+    if has_animation(sec, "anm_ammo_check_no_mag") then return false end
+
+    if not magazines then return false end
+    -- read the mag state BEFORE is_supported_weapon (it lazily creates a full default mag for unbound
+    -- weapons - that side effect would mask a genuinely mag-less weapon)
+    local mag_loaded = magazine_binder and get_mag_loaded(weapon:id())
+    if not is_supported_weapon(weapon) then return false end
+    if mag_loaded then return false end
+    return true
+end
+
 -- main ammo check function
 function check_Ammo(skip_animation)
     local actor = db.actor
@@ -2591,7 +2866,7 @@ function check_Ammo(skip_animation)
     if not currentAmmo then return end
 
     -- get ammo status using shared function
-    local message, clr, ammo_type, separate_tag = get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
+    local message, clr, ammo_type, separate_tag, segments = get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
 
     disable_info("sleep_active")
 
@@ -2600,6 +2875,7 @@ function check_Ammo(skip_animation)
     ac_pending_clr = clr
     ac_pending_ammo_type = ammo_type
     ac_pending_separate_tag = separate_tag
+    ac_pending_segments = segments
 
     -- cleanup previous events
     RemoveTimeEvent("ammo_check", "message_delay")
@@ -2823,15 +3099,13 @@ function check_Ammo(skip_animation)
         local uses_magazines = magazines and is_supported_weapon(weapon)
         local needs_no_mag_fallback = false
 
-        if uses_magazines then
-            local has_detachable_mag = magazine_binder and magazine_binder.weapon_default_magazine and
-                                       magazine_binder.weapon_default_magazine(weapon)
-            if has_detachable_mag then
-                local current_magazine = get_mag_loaded(weaponId)
-                if not current_magazine then
-                    needs_no_mag_fallback = true
-                end
-            end
+        -- No-mag detection matches the animation mutator: mags-supported AND no magazine loaded.
+        -- Use get_mag_loaded directly, NOT weapon_default_magazine - that lookup returns nil for some
+        -- detachable weapons (so the fallback was skipped and the default mag-check anim played).
+        -- Internal-mag / tube weapons keep mag_data (Mags creates it from their default_mag), so they
+        -- stay non-nil here and are not mistaken for mag-less.
+        if uses_magazines and not get_mag_loaded(weaponId) then
+            needs_no_mag_fallback = true
         end
 
         -- No magazine, but the weapon ships a dedicated no-mag inspect (anm_ammo_check_no_mag):
@@ -2846,7 +3120,25 @@ function check_Ammo(skip_animation)
         if needs_no_mag_fallback then
             -- weapon has proper inspect but NO magazine - cancel animation and apply fallback
             print_dbg("Ammo check for %s - has proper inspect but no mag, cancelling and using no_magazine_fallback=%s.", sec, no_magazine_fallback)
-            
+
+            -- arm the mutator to neutralize the engine's auto mag-check bore (it plays anm_ammo_check
+            -- on its own when the weapon bores; the fallback alone cannot stop it)
+            ac_suppress_inspect_until = time_global() + 1500
+
+            -- The mutator swaps the bore to anm_idle, which loops and would leave the weapon stuck in
+            -- state 4 (eBore). Poll briefly and force it back to idle so later checks aren't blocked.
+            RemoveTimeEvent("ammo_check", "ac_unstick_bore")
+            local _unstick_start = time_global()
+            CreateTimeEvent("ammo_check", "ac_unstick_bore", 0, function()
+                local w = db.actor and db.actor:active_item()
+                if not (w and IsWeapon(w)) then return true end
+                if w:get_state() == 4 then
+                    w:switch_state(0)  -- pull out of the (suppressed, looping) bore
+                    return true
+                end
+                return time_global() - _unstick_start > 1500  -- stop polling after the window
+            end)
+
             -- cancel any started animation and camera effects
             if level.stop_hud_motion then
                 level.stop_hud_motion()
@@ -3147,7 +3439,7 @@ function check_Ammo(skip_animation)
                         weapon:set_ammo_elapsed(currentAmmo - 1)
                         alife_create_item(ammo_section, actor, { ammo = 1 })
                         print_dbg("Ejected round: %s (remaining: %d)", ammo_section, currentAmmo - 1)
-                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag =
+                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag, ac_pending_segments =
                             get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
                     end
                 end
@@ -3176,7 +3468,7 @@ function check_Ammo(skip_animation)
                         weapon:set_ammo_elapsed(currentAmmo - 1)
                         alife_create_item(ammo_section, actor, { ammo = 1 })
                         print_dbg("Ejected round: %s (remaining: %d)", ammo_section, currentAmmo - 1)
-                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag =
+                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag, ac_pending_segments =
                             get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
                     end
                 end
@@ -3232,7 +3524,7 @@ function check_Ammo(skip_animation)
                         weapon:set_ammo_elapsed(currentAmmo - 1)
                         alife_create_item(ammo_section, actor, { ammo = 1 })
                         print_dbg("Ejected shell: %s (remaining: %d)", ammo_section, currentAmmo - 1)
-                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag =
+                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag, ac_pending_segments =
                             get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
                     end
                 end
@@ -3261,7 +3553,7 @@ function check_Ammo(skip_animation)
                         weapon:set_ammo_elapsed(currentAmmo - 1)
                         alife_create_item(ammo_section, actor, { ammo = 1 })
                         print_dbg("Ejected shell: %s (remaining: %d)", ammo_section, currentAmmo - 1)
-                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag =
+                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag, ac_pending_segments =
                             get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
                     end
                 end

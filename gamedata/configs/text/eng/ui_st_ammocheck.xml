@@ -16,6 +16,12 @@
     <string id="st_ac_no_mag_oitc">
         <text>No magazine + 1 in the chamber</text>
     </string>
+    <string id="st_ac_empty_mag_prefix">
+        <text>Empty magazine</text>
+    </string>
+    <string id="st_ac_no_mag_prefix">
+        <text>No magazine</text>
+    </string>
     <string id="st_ac_just_one">
         <text>Just one</text>
     </string>
@@ -120,6 +126,12 @@
     </string>
     <string id="ui_mcm_rax_ammo_check_display_usecolor_desc">
         <text>Enable color-coded messages based on ammo level (red = low, white = full).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_color_ammo_type">
+        <text>Colored Ammo Type/Tag</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_color_ammo_type_desc">
+        <text>Also color the ammo type name and tag by the ammo's own color (AP, HP, FMJ, etc). With this off, the ammo type/tag stays white everywhere while the level message keeps its color. Needs Colored Messages enabled.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_display_color_intensity">
         <text>Color Intensity</text>
@@ -257,6 +269,12 @@
     <string id="ui_mcm_rax_ammo_check_display_show_chamber_ammo_desc">
         <text>On the "1 in the chamber" messages (only a chambered round left, no or empty magazine), also show what that chambered round is. Needs Magazines Redux with "keep round in chamber" (retain round) enabled.</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_display_show_chamber_mismatch">
+        <text>Show Mismatched Chamber Round</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_show_chamber_mismatch_desc">
+        <text>When the chambered round is a different ammo type than the magazine top, show both inline at any fill level as "&lt;level&gt; (mag) + 1 (chamber)", e.g. "Full (9x18 FMJ) + 1 (9x18 AP)" or "About Half (9x18 FMJ) + 1 (9x18 AP)". In Tarkov-like display mode the chamber part shows only its tag, e.g. "About Half (9x18 FMJ) + 1 (AP)". When both match, the normal message is shown. Needs Magazines Redux with "keep round in chamber" (retain round) enabled.</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_display_highlight_ammo_mode">
         <text>Ammo Type Highlight</text>
     </string>
@@ -356,7 +374,7 @@
         <text>No Magazine Fallback</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_animation_no_magazine_fallback_desc">
-        <text>Animation when using Fake Reload mode and NO magazine is loaded (MagsRedux detachable mag weapons only). Hide/Show: switch weapon. Lower: lower weapon. None: just show message.</text>
+        <text>Animation when NO magazine is loaded (MagsRedux detachable mag weapons only). Hide/Show: switch weapon. Shake/Lower: a short weapon shake (or a lower on weapons without an inspect animation). None: just show message.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_animation_fake_reload_fallback">
         <text>Internal Mag Fallback</text>
@@ -368,7 +386,7 @@
         <text>Hide/Show Weapon</text>
     </string>
     <string id="rax_ammo_check_animation_no_magazine_fallback_lst_fallback_lower">
-        <text>Lower Weapon</text>
+        <text>Shake/Lower Weapon</text>
     </string>
     <string id="rax_ammo_check_animation_no_magazine_fallback_lst_fallback_none">
         <text>None (Message Only)</text>
@@ -502,6 +520,12 @@
     <string id="ui_mcm_rax_ammo_check_fastreload_speed_mult_desc">
         <text>Animation speed multiplier for the fast reload (1.25 = 25% faster). Kept modest because the reload sound is not sped up with it.</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_max_combined_speed">
+        <text>Max Speed With Fast Mag</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_max_combined_speed_desc">
+        <text>When loading a Mags Madness "fast mag" (it already speeds the reload by its own amount, up to about 35%), the fast reload boost above is throttled so the COMBINED reload speed does not exceed this multiplier (1.5 = at most 50% faster total). Our boost is never reduced below the fast mag's own speed; if this value is lower than the fast mag's multiplier, the fast reload simply adds nothing. No effect on normal mags.</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_fastreload_keep_last_mag">
         <text>Keep Last Magazine</text>
     </string>
@@ -537,6 +561,18 @@
     </string>
     <string id="ui_mcm_rax_ammo_check_fastreload_throw_force_desc">
         <text>How hard the magazine is thrown (0 = plain drop, 100 = strong toss). Has no effect when Throw Direction is set to Drop.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_slowdown_enable">
+        <text>Slow Down Normal Reloads</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_slowdown_enable_desc">
+        <text>Opposite of Fast Reload: makes every normal (non-fast) reload animation slower. Fast reloads are unaffected. Off by default.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_slowdown_pct">
+        <text>Reload Slowdown</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_slowdown_pct_desc">
+        <text>How much slower a normal reload plays, in percent (0 = no change, 25 = 25% slower). Needs "Slow Down Normal Reloads" enabled. Recommended maximum is 10-15%: going further desyncs the animation from the reload sound, which keeps playing at its original speed.</text>
     </string>
     <string id="ui_mm_title_rax_ammo_check_onekey">
         <text>One Key Weapon Controls</text>
@@ -680,6 +716,12 @@
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_show_letter_desc">
         <text>Append the mode letter to the message: [S] single, [B] burst, [A] auto. Works in the text, none and dots styles. With the None style it is the only thing shown.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_inspect_on_hold">
+        <text>Inspect Weapon on Hold</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_inspect_on_hold_desc">
+        <text>Hold the fire-mode key to play a weapon inspection animation instead of showing the current fire mode. Tapping the key still cycles the fire mode. Falls back to showing the mode if the weapon has no inspect animation.</text>
     </string>
     <string id="st_ac_fm_fullauto">
         <text>Full-Auto</text>

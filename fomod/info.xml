@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fomod>
+	<Name>AmmoCheck by Priler</Name>
+	<Author>Priler</Author>
+	<Version>3.0</Version>
+	<Website>https://github.com/Priler/AmmoCheck</Website>
+	<Groups>
+		<element>Gameplay</element>
+		<element>Animation</element>
+	</Groups>
+</fomod>

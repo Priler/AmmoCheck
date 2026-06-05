@@ -16,6 +16,12 @@
     <string id="st_ac_no_mag_oitc">
         <text>Нет магазина, один в патроннике</text>
     </string>
+    <string id="st_ac_empty_mag_prefix">
+        <text>Магазин пуст</text>
+    </string>
+    <string id="st_ac_no_mag_prefix">
+        <text>Нет магазина</text>
+    </string>
     <string id="st_ac_just_one">
         <text>Остался один</text>
     </string>
@@ -117,6 +123,12 @@
     </string>
     <string id="ui_mcm_rax_ammo_check_display_usecolor_desc">
         <text>Окрашивать сообщения в зависимости от количества патронов (красный - мало, белый - много).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_color_ammo_type">
+        <text>Цветной тип/тег патрона</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_color_ammo_type_desc">
+        <text>Также окрашивать название и тег типа патрона в собственный цвет патрона (AP, HP, FMJ и т.д.). Если выключено, тип/тег патрона остается белым везде, а сообщение об уровне сохраняет свой цвет. Требует включенных цветных сообщений.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_display_color_intensity">
         <text>Яркость цвета</text>
@@ -251,7 +263,12 @@
     <string id="ui_mcm_rax_ammo_check_display_show_chamber_ammo_desc">
         <text>На сообщениях "1 в патроннике" (остался только патрон в патроннике, без магазина или с пустым), также показывать, какой это патрон. Требует Magazines Redux с включённой опцией "оставлять патрон в патроннике".</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_display_highlight_ammo_mode">
+    <string id="ui_mcm_rax_ammo_check_display_show_chamber_mismatch">
+        <text>Показывать несовпадающий патрон в патроннике</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_display_show_chamber_mismatch_desc">
+        <text>Когда патрон в патроннике другого типа, чем верхний патрон в магазине, показывать оба в одну строку при любом уровне заполнения как "&lt;уровень&gt; (магазин) + 1 (патронник)", например "Полный (9x18 FMJ) + 1 (9x18 AP)" или "Около половины (9x18 FMJ) + 1 (9x18 AP)". В режиме отображения "Как в Тарков" часть для патронника показывает только тег, например "Около половины (9x18 FMJ) + 1 (AP)". Если типы совпадают, показывается обычное сообщение. Требует Magazines Redux с включенной опцией "сохранять патрон в патроннике".</text>
+    </string>    <string id="ui_mcm_rax_ammo_check_display_highlight_ammo_mode">
         <text>Подсветка типа патронов</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_display_highlight_ammo_mode_desc">
@@ -348,7 +365,7 @@
         <text>Без магазина</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_animation_no_magazine_fallback_desc">
-        <text>Анимация в режиме "Имитация перезарядки", когда магазин не вставлен (только для оружия со съёмными магазинами MagsRedux).</text>
+        <text>Анимация, когда магазин не вставлен (только для оружия со съёмными магазинами MagsRedux). Скрыть/показать: смена оружия. Трясти/Опустить: короткая тряска оружия (или опускание для оружия без анимации осмотра). Нет: только сообщение.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_animation_fake_reload_fallback">
         <text>Внутренний магазин</text>
@@ -360,7 +377,7 @@
         <text>Убрать/достать</text>
     </string>
     <string id="rax_ammo_check_animation_no_magazine_fallback_lst_fallback_lower">
-        <text>Опустить оружие</text>
+        <text>Трясти/Опустить оружие</text>
     </string>
     <string id="rax_ammo_check_animation_no_magazine_fallback_lst_fallback_none">
         <text>Ничего (только сообщение)</text>
@@ -494,6 +511,12 @@
     <string id="ui_mcm_rax_ammo_check_fastreload_speed_mult_desc">
         <text>Множитель скорости анимации быстрой перезарядки (1.25 = на 25% быстрее). Оставлен умеренным, так как звук перезарядки не ускоряется вместе с ней.</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_max_combined_speed">
+        <text>Макс. скорость с быстрым магазином</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_max_combined_speed_desc">
+        <text>При заряжании "быстрого магазина" из Mags Madness (он сам ускоряет перезарядку, до примерно 35%) бонус быстрой перезарядки выше ограничивается так, чтобы ИТОГОВАЯ скорость перезарядки не превышала этот множитель (1.5 = не более чем на 50% быстрее в сумме). Наш бонус никогда не опускается ниже собственной скорости быстрого магазина; если это значение меньше множителя быстрого магазина, быстрая перезарядка просто ничего не добавляет. На обычные магазины не влияет.</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_fastreload_keep_last_mag">
         <text>Сохранять последний магазин</text>
     </string>
@@ -529,6 +552,18 @@
     </string>
     <string id="ui_mcm_rax_ammo_check_fastreload_throw_force_desc">
         <text>Насколько сильно выбрасывается магазин (0 = просто уронить, 100 = сильный бросок). Не действует, если Направление выброса установлено на "Уронить".</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_slowdown_enable">
+        <text>Замедлять обычную перезарядку</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_slowdown_enable_desc">
+        <text>Противоположность быстрой перезарядки: делает анимацию любой обычной (не быстрой) перезарядки медленнее. На быструю перезарядку не влияет. По умолчанию выключено.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_slowdown_pct">
+        <text>Замедление перезарядки</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_fastreload_slowdown_pct_desc">
+        <text>Насколько медленнее проигрывается обычная перезарядка, в процентах (0 = без изменений, 25 = на 25% медленнее). Требует включенной опции "Замедлять обычную перезарядку". Рекомендуемый максимум: 10-15%. Дальше анимация рассинхронизируется со звуком перезарядки, который продолжает играть с исходной скоростью.</text>
     </string>
     <string id="ui_mm_title_rax_ammo_check_onekey">
         <text>Управление оружием одной клавишей</text>
@@ -672,6 +707,12 @@
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_show_letter_desc">
         <text>Добавлять к сообщению букву режима: [S] одиночный, [B] очередь, [A] авто. Работает в стилях Текст, Нет и Точки. В стиле Нет это единственное, что отображается.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_inspect_on_hold">
+        <text>Осмотр оружия при удержании</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_inspect_on_hold_desc">
+        <text>Удерживайте клавишу режима огня, чтобы проиграть анимацию осмотра оружия вместо показа текущего режима огня. Нажатие клавиши по-прежнему переключает режим огня. Если у оружия нет анимации осмотра, будет показан режим огня.</text>
     </string>
     <string id="st_ac_fm_fullauto">
         <text>Автоматический</text>

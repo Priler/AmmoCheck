@@ -12,6 +12,7 @@ local mcm_color_text     = true         -- tint the on-screen mode text per fire
 local mcm_display_style  = "text"       -- "text", "none", "dots", "dots_alt", or "ready_or_not"
 local mcm_show_letter    = false        -- append the mode letter [S]/[B]/[A] to the message
 local mcm_position       = "default"    -- "default" (follow AmmoCheck) or "screen_bottom"
+local mcm_inspect_on_hold = false        -- hold the key to inspect the weapon instead of showing the mode
 
 -- key_bind only resolves on MCM 1.6.0+; guard reads with the defaults above.
 local mcm_keybinds = ui_mcm and ui_mcm.key_hold
@@ -23,6 +24,9 @@ function on_game_start()
     RegisterScriptCallback("on_option_change", on_option_change)
     RegisterScriptCallback("on_before_key_press", on_before_key_press)
     RegisterScriptCallback("on_key_hold", on_key_hold)
+    -- re-hide the fire-mode widget after the HUD is rebuilt (menu close, weapon draw); see below
+    RegisterScriptCallback("GUI_on_hide", GUI_on_hide)
+    RegisterScriptCallback("actor_on_hud_animation_end", actor_on_hud_animation_end)
 end
 
 function actor_on_first_update()
@@ -58,8 +62,32 @@ function on_option_change()
         mcm_position = ui_mcm.get("rax_ammo_check/firemode/position") or "default"
         local sl = ui_mcm.get("rax_ammo_check/firemode/show_letter")
         mcm_show_letter = (sl == true or sl == 1)  -- default false
+        local ioh = ui_mcm.get("rax_ammo_check/firemode/inspect_on_hold")
+        mcm_inspect_on_hold = (ioh == true or ioh == 1)  -- default false
     end
     apply_hud_visibility()
+end
+
+-- Keep the vanilla/BHS fire-mode widget hidden across HUD rebuilds
+local function reassert_hud_hide()
+    if not mcm_hide_hud then return end
+    CreateTimeEvent("ac_fm_hud", "reassert", 0, function()
+        apply_hud_visibility()
+        return true
+    end)
+end
+
+-- menu (inventory / PDA) closed: the maingame HUD is shown/redrawn again
+function GUI_on_hide()
+    reassert_hud_hide()
+end
+
+-- weapon draw finished (anm_show*): the fire-mode indicator refreshes for the new active weapon. This
+-- also covers load: the indicator only appears once a weapon is out, which always plays a draw anim
+function actor_on_hud_animation_end(item, section, motion, state, slot)
+    if motion and string.find(tostring(motion), "^anm_show") then
+        reassert_hud_hide()
+    end
 end
 
 -- ### Helpers
@@ -434,6 +462,25 @@ function prev_fire_mode(weapon, old_fire_mode)
     CreateTimeEvent("ac_firemode", "show_delayed", 0, show_fire_mode, old_fire_mode)
 end
 
+-- Play a weapon-inspection animation (Tarkov inspired "look the gun over" anim) instead of showing the
+-- fire mode. Tries the common inspect motions; anm_bore is the near-universal idle inspect. Returns
+-- true if one was played, false if the weapon has none (caller then falls back to showing the mode)
+local INSPECT_ANIMS = { "anm_bore", "anm_inspect", "anm_ammo_check" }
+
+local function inspect_weapon(weapon)
+    if not (weapon and weapon.play_hud_motion) then return false end
+    if not (animation_common and animation_common.has_animation) then return false end
+    local sec = weapon:section()
+    for i = 1, #INSPECT_ANIMS do
+        local anm = INSPECT_ANIMS[i]
+        if animation_common.has_animation(sec, anm) then
+            weapon:play_hud_motion(anm, true, 7, 1, 0)
+            return true
+        end
+    end
+    return false
+end
+
 -- ### Input
 
 function on_before_key_press(key, bind, dis, flags)
@@ -465,6 +512,14 @@ function on_key_hold(key)
     if not (enabled and ui_mcm) then return end
     if mcm_key == DIK_keys.DIK_ESCAPE then return end  -- unbound
     if key == mcm_key and ui_mcm.key_hold("ac_firemode_hold", key) then
+        -- Inspect-on-hold: play the weapon inspection animation instead of showing the mode. Falls
+        -- back to showing the mode when off, the weapon is busy, or it has no inspect animation
+        if mcm_inspect_on_hold then
+            local weapon = db.actor and db.actor:active_item()
+            if is_supported_weapon(weapon) and is_weapon_ready(weapon) and inspect_weapon(weapon) then
+                return
+            end
+        end
         show_fire_mode(nil)
     end
 end

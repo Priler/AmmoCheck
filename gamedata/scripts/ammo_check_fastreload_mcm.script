@@ -14,15 +14,31 @@ local mcm_throw_dir  = "forward"  -- direction the dropped mag is tossed (relati
 local mcm_throw_force = 40        -- throw strength 0..100 (0 = plain drop, no impulse)
 local mcm_keep_last_mag = true    -- forbid fast reload when no spare mag is available (don't toss the last one)
 local onekey_enabled = false      -- One-Key owns the Reload bind when on, so Fast Reload stands down
+local slow_enabled    = false     -- optional, opposite of fast reload: slow down NORMAL (non-fast) reloads
+local slow_mult       = 1.0       -- normal-reload speed multiplier (<1 slows; 0.75 = 25% slower)
+local mcm_max_combined = 1.5      -- ceiling on the COMBINED reload speed (fast mag's own mult times our fast-reload mult) when a Mags Madness fast mag is incoming
 
--- throw tuning: force slider 100 maps to THROW_MAX_FORCE horizontal force; a small upward force arcs
--- the toss. Applied via physics_shell:apply_force (the engine has no set_linear_velocity), so these
--- are forces, not velocities - heavier mags travel a bit less for the same number.
-local THROW_MAX_FORCE = 160
-local THROW_UP_FORCE  = 45
+-- throw tuning via physics_shell:set_linear_vel(vec) (modded-exes erquired; directly sets
+-- velocity, which also wakes the body. Velocity is m/s: slider 100 maps to
+-- THROW_MAX_SPEED horizontal, THROW_UP_SPEED is a constant upward arc
+local THROW_MAX_SPEED = 7.0
+local THROW_UP_SPEED  = 1.5
 
 local fast_reload_active = false
+local fast_mag_mult = 1.0   -- reload_speed_mult of the mag Mags will load next (1 = a normal mag)
+local fr_effective_mult = 1.0  -- the actual reload-anim speed multiplier OUR boost applied (after the combined cap); read by the auto-check so its post-reload message delay shrinks to match the faster anim
 local FR_FLAG_MS = 1500   -- safety window (ms) to keep the speed flag armed for the reload anim
+
+-- Mags Madness "fast mags" compatibility; speed up the reload themselves via ver_dynamic_reload_speeds, which reads
+-- a per-mag reload_speed_mult from the mag section (e.g. 1.35 = 35% faster).
+-- Read the exact value so we can cap the COMBINED speed instead of guessing.
+-- Returns 1 for a normal mags
+local function mag_reload_mult(section)
+    if not section then return 1 end
+    local m = ini_sys and ini_sys:r_float_ex(section, "reload_speed_mult")
+    if not m or m <= 0 then return 1 end
+    return m
+end
 local FR_DROP_S  = 0.6    -- delay (s) before dropping the ejected mag (eject happens ~0.1-0.3s in)
 
 function on_game_start()
@@ -31,6 +47,7 @@ function on_game_start()
     RegisterScriptCallback("on_before_key_press", on_before_key_press)
     if animation_common and animation_common.add_anim_mutator then
         animation_common.add_anim_mutator(fast_reload_anim, 0.05)
+        animation_common.add_anim_mutator(slow_reload_anim, 0.05)
     end
 end
 
@@ -40,12 +57,19 @@ function on_option_change()
     enabled = (en == true or en == 1)
     mcm_modifier = ui_mcm.get("rax_ammo_check/fastreload/modifier") or 1
     mcm_speed_mult = ui_mcm.get("rax_ammo_check/fastreload/speed_mult") or 1.25
+    mcm_max_combined = ui_mcm.get("rax_ammo_check/fastreload/max_combined_speed") or 1.5
     mcm_throw_dir = ui_mcm.get("rax_ammo_check/fastreload/throw_direction") or "forward"
     mcm_throw_force = ui_mcm.get("rax_ammo_check/fastreload/throw_force") or 40
     local klm = ui_mcm.get("rax_ammo_check/fastreload/keep_last_mag")
     mcm_keep_last_mag = (klm == true or klm == 1 or klm == nil)  -- default true
     local ok = ui_mcm.get("rax_ammo_check/onekey/enable")
     onekey_enabled = (ok == true or ok == 1)
+
+    local se = ui_mcm.get("rax_ammo_check/fastreload/slowdown_enable")
+    slow_enabled = (se == true or se == 1)
+    local pct = ui_mcm.get("rax_ammo_check/fastreload/slowdown_pct") or 0
+    if pct < 0 then pct = 0 elseif pct > 25 then pct = 25 end  -- cap at 25% slowdown
+    slow_mult = 1 - (pct / 100)
 end
 
 -- ### Drop helpers (catch the ejected mag wherever Mags routes it: main inventory or a pouch)
@@ -95,32 +119,39 @@ end
 
 -- ### Throw direction
 --
--- Force (fx, fy, fz) to fling the dropped mag, built from the player's facing. Horizontal directions
--- are normalized then scaled by the force slider; a small upward force arcs the toss (down pushes it
--- into the ground instead). Returned as three numbers for physics_shell:apply_force.
-local function throw_force_vec()
-    local fdir = db.actor:direction()
-    local hx, hz, fy = 0, 0, THROW_UP_FORCE
+-- Set the dropped mag's velocity directly toward the chosen direction.
+-- device().cam_dir / cam_right
+-- Returns true once applied (the shell must exist), false to keep retrying
+local function do_throw(obj)
+    local shell = obj:get_physics_shell()
+    if not shell then return false end
+
+    local d = device()
+    local fwd, rgt = d.cam_dir, d.cam_right
+    local hx, hz, uy = 0, 0, THROW_UP_SPEED
     if mcm_throw_dir == "forward" then
-        hx, hz = fdir.x, fdir.z
+        hx, hz = fwd.x, fwd.z
     elseif mcm_throw_dir == "backward" then
-        hx, hz = -fdir.x, -fdir.z
+        hx, hz = -fwd.x, -fwd.z
     elseif mcm_throw_dir == "right" then
-        hx, hz = -fdir.z, fdir.x
+        hx, hz = rgt.x, rgt.z
     elseif mcm_throw_dir == "left" then
-        hx, hz = fdir.z, -fdir.x
+        hx, hz = -rgt.x, -rgt.z
     elseif mcm_throw_dir == "down" then
-        fy = -THROW_UP_FORCE
+        uy = -2.0
     end
     local len = math.sqrt(hx * hx + hz * hz)
     if len > 0.0001 then hx, hz = hx / len, hz / len end
-    local mag = (mcm_throw_force / 100) * THROW_MAX_FORCE
-    return hx * mag, fy, hz * mag
+
+    local speed = (mcm_throw_force / 100) * THROW_MAX_SPEED
+    local vel = vector():set(hx * speed, uy, hz * speed)
+    if shell.unfreeze then shell:unfreeze() end  -- make sure the body is not fixed/asleep
+    shell:set_linear_vel(vel)
+    return true
 end
 
--- Apply the throw to a just-dropped mag. drop_item spawns the world object but its physics shell is
--- not ready for a frame or two, so retry until get_physics_shell returns one, then apply the force.
--- (The shell has only apply_force on this engine: no set_linear_velocity, no is_active.)
+-- Apply the throw to a just-dropped mag. drop_item spawns the world object but its physics shell is not
+-- ready for a frame or two, so retry until do_throw can grab the shell (then bail after a short budget)
 local function schedule_throw(id)
     if mcm_throw_dir == "drop" or mcm_throw_force <= 0 then return end
     local tries = 0
@@ -128,13 +159,10 @@ local function schedule_throw(id)
     CreateTimeEvent("ac_fastreload_throw", "v" .. id, 0, function()
         tries = tries + 1
         local obj = level.object_by_id(id)
-        if not obj then return true end
-        local shell = obj:get_physics_shell()
-        if shell then
-            shell:apply_force(throw_force_vec())
+        if obj and do_throw(obj) then
             return true
         end
-        return tries > 15  -- ~15 frames; give up if no shell ever appears
+        return tries > 15  -- ~15 frames; give up if the shell never appears
     end)
 end
 
@@ -160,11 +188,27 @@ end
 --
 -- Arms the speed flag (read by the anim mutator) and schedules the old-mag drop. Snapshot of the
 -- actor's mags is taken NOW, before the eject, so the drop callback can tell which mag Mags ejected.
-local function arm_fast_reload(old_sec)
+-- Our boost multiplier after the combined cap: a fast mag already scales the reload by fast_mag_mult,
+-- and our boost multiplies on top, so limit ours to keep the product within mcm_max_combined
+local function capped_boost_mult()
+    local mult = mcm_speed_mult
+    if fast_mag_mult > 1 then
+        local allowed = mcm_max_combined / fast_mag_mult
+        if allowed < 1 then allowed = 1 end
+        if mult > allowed then mult = allowed end
+    end
+    return mult
+end
+
+local function arm_fast_reload(old_sec, next_sec)
     fast_reload_active = true
+    fast_mag_mult = mag_reload_mult(next_sec)  -- the incoming mag's own reload speedup (1 if normal)
+    fr_effective_mult = capped_boost_mult()    -- snapshot for the auto-check delay scaler
     RemoveTimeEvent("ac_fastreload", "clear")
     CreateTimeEvent("ac_fastreload", "clear", FR_FLAG_MS / 1000, function()
         fast_reload_active = false
+        fast_mag_mult = 1.0
+        fr_effective_mult = 1.0
         return true
     end)
 
@@ -210,14 +254,18 @@ function do_fast_reload(weapon)
     local old_sec = mag_data and mag_data.section
     if not old_sec or old_sec == "no_mag" then return false end
 
+    -- The spare mag Mags will actually load next (largest compatible / largest of type). Used both
+    -- for the "keep last magazine" guard and to detect an incoming "fast mag" so we can cap our boost
+    local spare = magazines.find_magazine and magazines.find_magazine(weapon)
+
     -- "Keep last magazine": with no spare to swap in, a fast reload would just toss the only mag and
-    -- leave the weapon empty-handed. find_magazine searches the carried/pouch mags (what Mags would
-    -- actually load); nil means no spare, so block. Caller then falls back to a normal reload (a no-op).
-    if mcm_keep_last_mag and magazines.find_magazine and not magazines.find_magazine(weapon) then
+    -- leave the weapon empty-handed. nil means no spare, so block. Caller then falls back to a normal
+    -- reload (a no-op).
+    if mcm_keep_last_mag and magazines.find_magazine and not spare then
         return false
     end
 
-    arm_fast_reload(old_sec)
+    arm_fast_reload(old_sec, spare and spare:section())
     return true
 end
 
@@ -252,6 +300,28 @@ function fast_reload_anim(anim_table, wpn)
     local name = anim_table and anim_table.anm_name
     -- covers anm_reload, anm_reload_empty, anm_reload_misfire, etc.
     if name and string.find(tostring(name), "^anm_reload") then
-        anim_table.anm_speed = (anim_table.anm_speed or 1) * mcm_speed_mult
+        anim_table.anm_speed = (anim_table.anm_speed or 1) * capped_boost_mult()
+    end
+end
+
+-- Public: the reload-anim speed multiplier of the active fast reload (after the combined cap), or 1
+-- when no fast reload is in flight. The auto-check-after-reload divides its post-reload message delay
+-- by this so the "Loaded" message appears proportionally sooner, matching the faster animation
+function get_fast_reload_speedup()
+    if fast_reload_active and fr_effective_mult > 1 then return fr_effective_mult end
+    return 1.0
+end
+
+-- ### Optional reload slowdown (opposite of fast reload)
+--
+-- Slows every NORMAL reload by up to N%. A fast reload is left alone (fast_reload_active is set for
+-- the speed-up path, including One-Key's fast-reload action), so the two never stack
+function slow_reload_anim(anim_table, wpn)
+    if not (slow_enabled and wpn) then return end
+    if fast_reload_active then return end       -- never slow a fast reload
+    if slow_mult >= 1 then return end           -- 0% slowdown: no-op
+    local name = anim_table and anim_table.anm_name
+    if name and string.find(tostring(name), "^anm_reload") then
+        anim_table.anm_speed = (anim_table.anm_speed or 1) * slow_mult
     end
 end
