@@ -500,7 +500,7 @@
         <text>Hold a modifier and press Reload for a faster reload that DROPS the old magazine on the ground instead of keeping it (a tactical speed reload).</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fastreload_mags_note">
-        <text>Only works with the Magazines mod (Anomaly Magazines Redux).</text>
+        <text>Requires the Magazines mod (Anomaly Magazines Redux) AND Dynamic Reload Speeds. Dynamic Reload Speeds drives the sped-up animation and keeps the reload sound in sync; without it Fast Reload does nothing.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fastreload_enable">
         <text>Enable Fast Reload</text>
@@ -604,11 +604,38 @@
     <string id="ui_mcm_rax_ammo_check_onekey_focuses_pda_desc">
         <text>When ON, pressing the Action Key while the PDA is in hand raises or lowers the PDA, so the same key toggles the device.</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_tap_behavior">
+        <text>Tap Action</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_tap_behavior_desc">
+        <text>What a single tap does. Holding the modifier and tapping always unjams (and takes priority over this). Situational: ammo wheel when 3+ types are available, swap to next when exactly 2, reload when fewer. Next Ammo Type: cycle to the next available type. Ammo Wheel: always open the wheel. Reload: just reload. Fast Reload: speed reload that drops the old mag. Ammo Check: play the inspect/check.</text>
+    </string>
+    <string id="rax_ammo_check_onekey_tap_behavior_lst_tp_none">
+        <text>None (Disabled)</text>
+    </string>
+    <string id="rax_ammo_check_onekey_tap_behavior_lst_tp_reload">
+        <text>Reload</text>
+    </string>
+    <string id="rax_ammo_check_onekey_tap_behavior_lst_tp_fast_reload">
+        <text>Fast Reload (drop old mag)</text>
+    </string>
+    <string id="rax_ammo_check_onekey_tap_behavior_lst_tp_next">
+        <text>Next Ammo Type</text>
+    </string>
+    <string id="rax_ammo_check_onekey_tap_behavior_lst_tp_wheel">
+        <text>Ammo Wheel</text>
+    </string>
+    <string id="rax_ammo_check_onekey_tap_behavior_lst_tp_check">
+        <text>Ammo Check</text>
+    </string>
+    <string id="rax_ammo_check_onekey_tap_behavior_lst_tp_situational">
+        <text>Situational</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_onekey_doubletap_behavior">
         <text>Double-Tap Action</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_onekey_doubletap_behavior_desc">
-        <text>What a double-tap does. Situational: ammo wheel when 3+ types are available, swap to next when exactly 2, reload when fewer. Next Ammo Type: cycle to the next available type. Ammo Wheel: always open the wheel. Reload: just reload.</text>
+        <text>What a double-tap does. Situational: ammo wheel when 3+ types are available, swap to next when exactly 2, reload when fewer. Next Ammo Type: cycle to the next available type. Ammo Wheel: always open the wheel. Reload: just reload. Ammo Check: play the inspect/check.</text>
     </string>
     <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_none">
         <text>None (Disabled)</text>
@@ -625,7 +652,37 @@
     <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_wheel">
         <text>Ammo Wheel</text>
     </string>
+    <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_check">
+        <text>Ammo Check</text>
+    </string>
     <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_situational">
+        <text>Situational</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_hold_behavior">
+        <text>Hold Action</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_hold_behavior_desc">
+        <text>What holding the key does. Ammo Check: play the inspect/check. Reload: just reload. Fast Reload: speed reload that drops the old mag. Next Ammo Type: cycle to the next type. Ammo Wheel: open the wheel. Situational: wheel/next/reload by how many types are available. None: holding does nothing, the press still runs the tap action on release.</text>
+    </string>
+    <string id="rax_ammo_check_onekey_hold_behavior_lst_ho_none">
+        <text>None (Disabled)</text>
+    </string>
+    <string id="rax_ammo_check_onekey_hold_behavior_lst_ho_reload">
+        <text>Reload</text>
+    </string>
+    <string id="rax_ammo_check_onekey_hold_behavior_lst_ho_fast_reload">
+        <text>Fast Reload (drop old mag)</text>
+    </string>
+    <string id="rax_ammo_check_onekey_hold_behavior_lst_ho_next">
+        <text>Next Ammo Type</text>
+    </string>
+    <string id="rax_ammo_check_onekey_hold_behavior_lst_ho_wheel">
+        <text>Ammo Wheel</text>
+    </string>
+    <string id="rax_ammo_check_onekey_hold_behavior_lst_ho_check">
+        <text>Ammo Check</text>
+    </string>
+    <string id="rax_ammo_check_onekey_hold_behavior_lst_ho_situational">
         <text>Situational</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_onekey_hold_ms">
@@ -679,7 +736,7 @@
         <text>Fire Mode Display Style</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_display_style_desc">
-        <text>How to show the fire mode. Text: word labels. None: nothing (pair with Display Fire Mode Letter to show just the letter). Dots: four dots, white for active and dark for empty (single 1, burst N, full-auto 4). Dots alt.: only the white active dots, no padding. Ready or Not: a fire-selector graphic (with baked mode text). Ready or Not (no text): the same graphic without the text. Color ON draws it red, OFF white. The two-tone dark dots need Custom Text Rendering; without it empty dots show as 'o'. The Ready or Not selector body (with or without a burst position) is derived from the weapon's own fire modes, so it works for any weapon.</text>
+        <text>How to show the fire mode. Text: word labels. None: nothing (pair with Display Fire Mode Letter to show just the letter). Dots: four dots, white for active and dark for empty (single 1, burst N, full-auto 4). Dots alt.: only the white active dots, no padding. Custom Texture: a fire-selector graphic chosen in the Fire Mode Texture option below. The two-tone dark dots need Custom Text Rendering; without it empty dots show as 'o'.</text>
     </string>
     <string id="rax_ammo_check_firemode_display_style_lst_ds_text">
         <text>Text</text>
@@ -693,17 +750,29 @@
     <string id="rax_ammo_check_firemode_display_style_lst_ds_dots_alt">
         <text>Dots alt.</text>
     </string>
-    <string id="rax_ammo_check_firemode_display_style_lst_ds_ron">
+    <string id="rax_ammo_check_firemode_display_style_lst_ds_custom">
+        <text>Custom Texture</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_texture">
+        <text>Fire Mode Texture</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_texture_desc">
+        <text>Which selector graphic the Custom Texture display style draws. Ready or Not: a fire-selector with baked mode text. Ready or Not (no text): the same graphic without the text. Color ON draws it red, OFF white. BWais's texture: uses the atlas from BWais FireModeCheck (that mod must be installed) and is tinted by the Hue/Opacity options. The selector body (with or without a burst position) is derived from the weapon's own fire modes, so it works for any weapon. Only used when Display Style is set to Custom Texture.</text>
+    </string>
+    <string id="rax_ammo_check_firemode_texture_lst_tx_ron_text">
         <text>Ready or Not</text>
     </string>
-    <string id="rax_ammo_check_firemode_display_style_lst_ds_ron_notext">
+    <string id="rax_ammo_check_firemode_texture_lst_tx_ron_notext">
         <text>Ready or Not (no text)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_texture_lst_tx_bwais">
+        <text>BWais's texture (requires his mod)</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_position">
         <text>Display Position</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_position_desc">
-        <text>Where the fire mode shows. Default: follow the AmmoCheck message position (Display settings). Screen Bottom: pin to the bottom center. Applies to all styles including Ready or Not. The text and dots styles only move when Custom Text Rendering is on; the plain message line always sits at the bottom.</text>
+        <text>Where the fire mode shows. Default: follow the AmmoCheck message position (Display settings). Screen Bottom: pin to the very bottom edge, below the bottom-center. Applies to all styles including Ready or Not. The text and dots styles only move when Custom Text Rendering is on; the plain message line always sits at the bottom.</text>
     </string>
     <string id="rax_ammo_check_firemode_position_lst_pos_default">
         <text>Default</text>
@@ -722,6 +791,24 @@
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_inspect_on_hold_desc">
         <text>Hold the fire-mode key to play a weapon inspection animation instead of showing the current fire mode. Tapping the key still cycles the fire mode. Falls back to showing the mode if the weapon has no inspect animation.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_ron_opacity">
+        <text>Custom Texture Opacity</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_ron_opacity_desc">
+        <text>Transparency of the selected fire mode texture. 255 is fully opaque, 0 is invisible. Only applies to the Custom Texture display style.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_ron_hue">
+        <text>Custom Hue Tint</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_ron_hue_desc">
+        <text>Color tint for the selected fire mode texture. 0 leaves the texture's own color. 1-360 applies a hue. Use the no-text (white) variant for a clean tint; the red texture fights a colored tint. Only applies to the Custom Texture display style.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_ron_y_offset">
+        <text>Custom Texture Y Offset</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_ron_y_offset_desc">
+        <text>Nudge the custom texture up or down. Negative moves it up, positive moves it down (pixels in the 1024x768 UI space). Use it to fine-tune the position, for example to push the graphic right to the screen bottom. Only applies to the Custom Texture display style.</text>
     </string>
     <string id="st_ac_fm_fullauto">
         <text>Full-Auto</text>

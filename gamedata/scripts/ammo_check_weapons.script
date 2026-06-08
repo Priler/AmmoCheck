@@ -118,7 +118,7 @@ bolt_action_rifles = {
     -- ["wpn_sks"] = { delay = 0.5 },
     -- ["wpn_sv98"] = { delay = 0.7 },
     -- ["wpn_svd"] = { delay = 0.6 },
-    -- ["wpn_mosin"] = { delay = 0.8 },
+    ["wpn_mosin"] = { delay = 1.2 }, -- vanilla Mosin: enable explicit bolt cycle
 }
 
 
@@ -226,7 +226,7 @@ ignore_fake_animations = {
     ["wpn_m16"] = true, -- drops magazine (non-immersive)
     ["wpn_vintorez_nimble"] = true, -- drops magazine (non-immersive)
 
-    ["wpn_mosin"] = true,         -- full ammo change (non-immersive) -- vanilla mosin only
+    ["wpn_mosin"] = false,        -- vanilla Mosin: allow bolt_action_rifles handling instead of ignore fallback
     ["wpn_mosin_k"] = false,      -- Kmack Mosin Trio variant: opt back out (bolt_action_rifles handles it)
     ["wpn_mosin_carbine"] = false, -- Kmack Mosin Trio variant: opt back out
 

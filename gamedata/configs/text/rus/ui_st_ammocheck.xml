@@ -491,7 +491,7 @@
         <text>Удерживайте модификатор и нажмите Перезарядку для ускоренной перезарядки, которая ВЫБРАСЫВАЕТ старый магазин на землю, а не оставляет его (тактическая быстрая перезарядка).</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fastreload_mags_note">
-        <text>Работает только с модом на магазины (Anomaly Magazines Redux).</text>
+        <text>Требует мод на магазины (Anomaly Magazines Redux) И Dynamic Reload Speeds. Dynamic Reload Speeds проигрывает ускоренную анимацию и синхронизирует звук перезарядки; без него Быстрая перезарядка не работает.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_fastreload_enable">
         <text>Включить быструю перезарядку</text>
@@ -595,11 +595,38 @@
     <string id="ui_mcm_rax_ammo_check_onekey_focuses_pda_desc">
         <text>Если включено, нажатие клавиши действия, когда в руках КПК, поднимает или опускает его, и та же клавиша переключает устройство.</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_tap_behavior">
+        <text>Действие по нажатию</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_tap_behavior_desc">
+        <text>Что делает одиночное нажатие. Удержание модификатора с нажатием всегда устраняет заклинивание (и имеет приоритет над этим). Ситуативно: колесо патронов при 3+ типах, переключение на следующий при 2, перезарядка при меньшем количестве. Следующий тип: переключить на следующий доступный тип. Колесо патронов: всегда открывать колесо. Перезарядка: просто перезарядка. Быстрая перезарядка: скоростная перезарядка со сбросом старого магазина. Проверка патронов: проиграть осмотр/проверку.</text>
+    </string>
+    <string id="rax_ammo_check_onekey_tap_behavior_lst_tp_none">
+        <text>Отключено</text>
+    </string>
+    <string id="rax_ammo_check_onekey_tap_behavior_lst_tp_reload">
+        <text>Перезарядка</text>
+    </string>
+    <string id="rax_ammo_check_onekey_tap_behavior_lst_tp_fast_reload">
+        <text>Быстрая перезарядка (сброс старого магазина)</text>
+    </string>
+    <string id="rax_ammo_check_onekey_tap_behavior_lst_tp_next">
+        <text>Следующий тип патронов</text>
+    </string>
+    <string id="rax_ammo_check_onekey_tap_behavior_lst_tp_wheel">
+        <text>Колесо патронов</text>
+    </string>
+    <string id="rax_ammo_check_onekey_tap_behavior_lst_tp_check">
+        <text>Проверка патронов</text>
+    </string>
+    <string id="rax_ammo_check_onekey_tap_behavior_lst_tp_situational">
+        <text>Ситуативно</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_onekey_doubletap_behavior">
         <text>Действие по двойному нажатию</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_onekey_doubletap_behavior_desc">
-        <text>Что делает двойное нажатие. Ситуативно: колесо патронов при 3+ типах, переключение на следующий при 2, перезарядка при меньшем количестве. Следующий тип: переключить на следующий доступный тип. Колесо патронов: всегда открывать колесо. Перезарядка: просто перезарядка.</text>
+        <text>Что делает двойное нажатие. Ситуативно: колесо патронов при 3+ типах, переключение на следующий при 2, перезарядка при меньшем количестве. Следующий тип: переключить на следующий доступный тип. Колесо патронов: всегда открывать колесо. Перезарядка: просто перезарядка. Проверка патронов: проиграть осмотр/проверку.</text>
     </string>
     <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_none">
         <text>Отключено</text>
@@ -616,7 +643,37 @@
     <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_wheel">
         <text>Колесо патронов</text>
     </string>
+    <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_check">
+        <text>Проверка патронов</text>
+    </string>
     <string id="rax_ammo_check_onekey_doubletap_behavior_lst_dt_situational">
+        <text>Ситуативно</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_hold_behavior">
+        <text>Действие при удержании</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_hold_behavior_desc">
+        <text>Что делает удержание клавиши. Проверка патронов: проиграть осмотр/проверку. Перезарядка: просто перезарядка. Быстрая перезарядка: скоростная перезарядка со сбросом старого магазина. Следующий тип: переключить на следующий тип. Колесо патронов: открыть колесо. Ситуативно: колесо/следующий/перезарядка в зависимости от числа доступных типов. Отключено: удержание ничего не делает, нажатие всё равно выполняет действие по нажатию при отпускании.</text>
+    </string>
+    <string id="rax_ammo_check_onekey_hold_behavior_lst_ho_none">
+        <text>Отключено</text>
+    </string>
+    <string id="rax_ammo_check_onekey_hold_behavior_lst_ho_reload">
+        <text>Перезарядка</text>
+    </string>
+    <string id="rax_ammo_check_onekey_hold_behavior_lst_ho_fast_reload">
+        <text>Быстрая перезарядка (сброс старого магазина)</text>
+    </string>
+    <string id="rax_ammo_check_onekey_hold_behavior_lst_ho_next">
+        <text>Следующий тип патронов</text>
+    </string>
+    <string id="rax_ammo_check_onekey_hold_behavior_lst_ho_wheel">
+        <text>Колесо патронов</text>
+    </string>
+    <string id="rax_ammo_check_onekey_hold_behavior_lst_ho_check">
+        <text>Проверка патронов</text>
+    </string>
+    <string id="rax_ammo_check_onekey_hold_behavior_lst_ho_situational">
         <text>Ситуативно</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_onekey_hold_ms">
@@ -670,7 +727,7 @@
         <text>Стиль отображения режима огня</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_display_style_desc">
-        <text>Как показывать режим огня. Текст: словами. Нет: ничего (включите "Показывать букву режима", чтобы показать только букву). Точки: четыре точки, белые - активные, тёмные - пустые (одиночный 1, очередь N, авто 4). Точки альт.: только белые активные точки, без заполнения. Ready or Not: графика переключателя огня внизу экрана. Ready or Not (без текста): та же графика, но без текста. Вкл - красная, Выкл - белая. Корпус переключателя Ready or Not (с позицией очереди или без) определяется по режимам огня самого оружия, поэтому работает для любого оружия.</text>
+        <text>Как показывать режим огня. Текст: словами. Нет: ничего (включите "Показывать букву режима", чтобы показать только букву). Точки: четыре точки, белые - активные, тёмные - пустые (одиночный 1, очередь N, авто 4). Точки альт.: только белые активные точки, без заполнения. Своя текстура: графика переключателя огня, выбранная в опции "Текстура режима огня" ниже. Двухцветные тёмные точки требуют кастомной отрисовки текста; без неё пустые точки показываются как 'o'.</text>
     </string>
     <string id="rax_ammo_check_firemode_display_style_lst_ds_text">
         <text>Текст</text>
@@ -684,17 +741,29 @@
     <string id="rax_ammo_check_firemode_display_style_lst_ds_dots_alt">
         <text>Точки альт.</text>
     </string>
-    <string id="rax_ammo_check_firemode_display_style_lst_ds_ron">
+    <string id="rax_ammo_check_firemode_display_style_lst_ds_custom">
+        <text>Своя текстура</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_texture">
+        <text>Текстура режима огня</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_texture_desc">
+        <text>Какую графику переключателя рисует стиль "Своя текстура". Ready or Not: переключатель огня с впечатанным текстом режима. Ready or Not (без текста): та же графика без текста. Цвет Вкл - красная, Выкл - белая. Текстура BWais: использует атлас из мода BWais FireModeCheck (этот мод должен быть установлен), тонируется опциями Оттенка/Прозрачности. Корпус переключателя (с позицией очереди или без) определяется по режимам огня самого оружия, поэтому работает для любого оружия. Используется только когда стиль отображения - "Своя текстура".</text>
+    </string>
+    <string id="rax_ammo_check_firemode_texture_lst_tx_ron_text">
         <text>Ready or Not</text>
     </string>
-    <string id="rax_ammo_check_firemode_display_style_lst_ds_ron_notext">
+    <string id="rax_ammo_check_firemode_texture_lst_tx_ron_notext">
         <text>Ready or Not (без текста)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_texture_lst_tx_bwais">
+        <text>Текстура BWais (требует его мод)</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_position">
         <text>Положение на экране</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_position_desc">
-        <text>Где показывать режим огня. По умолчанию: следовать положению сообщений AmmoCheck (настройки Отображение). Низ экрана: закрепить по центру внизу. Применяется ко всем стилям, включая Ready or Not. Стили текста и точек перемещаются только при включённой кастомной отрисовке текста; обычная строка сообщений всегда внизу.</text>
+        <text>Где показывать режим огня. По умолчанию: следовать положению сообщений AmmoCheck (настройки Отображение). Низ экрана: закрепить у самого нижнего края, ниже центра внизу. Применяется ко всем стилям, включая Ready or Not. Стили текста и точек перемещаются только при включённой кастомной отрисовке текста; обычная строка сообщений всегда внизу.</text>
     </string>
     <string id="rax_ammo_check_firemode_position_lst_pos_default">
         <text>По умолчанию</text>
@@ -713,6 +782,18 @@
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_inspect_on_hold_desc">
         <text>Удерживайте клавишу режима огня, чтобы проиграть анимацию осмотра оружия вместо показа текущего режима огня. Нажатие клавиши по-прежнему переключает режим огня. Если у оружия нет анимации осмотра, будет показан режим огня.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_ron_opacity">
+        <text>Прозрачность своей текстуры</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_ron_opacity_desc">
+        <text>Прозрачность выбранной текстуры режима огня. 255 - полностью непрозрачно, 0 - невидимо. Действует только на стиль отображения "Своя текстура".</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_ron_hue">
+        <text>Оттенок своей текстуры</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_ron_hue_desc">
+        <text>Цветовой оттенок выбранной текстуры режима огня. 0 оставляет собственный цвет текстуры. 1-360 применяет оттенок. Для чистого оттенка используйте вариант без текста (белый); красная текстура искажает цветной оттенок. Действует только на стиль отображения "Своя текстура".</text>
     </string>
     <string id="st_ac_fm_fullauto">
         <text>Автоматический</text>

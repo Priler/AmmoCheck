@@ -9,10 +9,14 @@ local mcm_key            = DIK_keys.DIK_X
 local mcm_modifier_prev  = 1            -- 1 shift, 2 ctrl, 3 alt
 local mcm_hide_hud       = false        -- hide the vanilla fire-mode HUD indicator
 local mcm_color_text     = true         -- tint the on-screen mode text per fire mode (Text style only)
-local mcm_display_style  = "text"       -- "text", "none", "dots", "dots_alt", or "ready_or_not"
+local mcm_display_style  = "text"       -- "text", "none", "dots", "dots_alt", or "custom_texture"
+local mcm_ron_texture    = "ron_text"   -- which graphic the "Custom texture" style draws: ron_text / ron_notext
 local mcm_show_letter    = false        -- append the mode letter [S]/[B]/[A] to the message
 local mcm_position       = "default"    -- "default" (follow AmmoCheck) or "screen_bottom"
 local mcm_inspect_on_hold = false        -- hold the key to inspect the weapon instead of showing the mode
+local mcm_ron_opacity    = 255          -- Ready or Not indicator alpha 0..255
+local mcm_ron_hue        = 0            -- Ready or Not indicator hue tint 0..360 (0 = neutral/no tint)
+local mcm_ron_y_offset   = 0            -- manual vertical nudge (px) for the custom texture indicator
 
 -- key_bind only resolves on MCM 1.6.0+; guard reads with the defaults above.
 local mcm_keybinds = ui_mcm and ui_mcm.key_hold
@@ -24,9 +28,6 @@ function on_game_start()
     RegisterScriptCallback("on_option_change", on_option_change)
     RegisterScriptCallback("on_before_key_press", on_before_key_press)
     RegisterScriptCallback("on_key_hold", on_key_hold)
-    -- re-hide the fire-mode widget after the HUD is rebuilt (menu close, weapon draw); see below
-    RegisterScriptCallback("GUI_on_hide", GUI_on_hide)
-    RegisterScriptCallback("actor_on_hud_animation_end", actor_on_hud_animation_end)
 end
 
 function actor_on_first_update()
@@ -43,6 +44,28 @@ local function apply_hud_visibility()
     if (mcm_hide_hud and pos.x > 0) or ((not mcm_hide_hud) and pos.x < 0) then
         pos.x = -1 * pos.x
         widget:SetWndPos(pos)
+    end
+end
+
+-- ### BWais FireModeCheck compatibility
+--
+local bwais_suppressed = false
+local function set_bwais_suppressed(suppress)
+    if not (bwais_firemode and bwais_firemode.bwais_on_before_key_press) then return end
+    if suppress and not bwais_suppressed then
+        UnregisterScriptCallback("on_before_key_press", bwais_firemode.bwais_on_before_key_press)
+        if bwais_firemode.on_option_change then UnregisterScriptCallback("on_option_change", bwais_firemode.on_option_change) end
+        if bwais_firemode.actor_on_first_update then UnregisterScriptCallback("actor_on_first_update", bwais_firemode.actor_on_first_update) end
+        if bwais_firemode.actor_on_net_destroy then UnregisterScriptCallback("actor_on_net_destroy", bwais_firemode.actor_on_net_destroy) end
+        if bwais_firemode_hud and bwais_firemode_hud.deactivate_hud then bwais_firemode_hud.deactivate_hud() end
+        bwais_suppressed = true
+    elseif (not suppress) and bwais_suppressed then
+        RegisterScriptCallback("on_before_key_press", bwais_firemode.bwais_on_before_key_press)
+        if bwais_firemode.on_option_change then RegisterScriptCallback("on_option_change", bwais_firemode.on_option_change) end
+        if bwais_firemode.actor_on_first_update then RegisterScriptCallback("actor_on_first_update", bwais_firemode.actor_on_first_update) end
+        if bwais_firemode.actor_on_net_destroy then RegisterScriptCallback("actor_on_net_destroy", bwais_firemode.actor_on_net_destroy) end
+        if bwais_firemode.actor_on_first_update then bwais_firemode.actor_on_first_update() end  -- re-init its HUD
+        bwais_suppressed = false
     end
 end
 
@@ -64,30 +87,13 @@ function on_option_change()
         mcm_show_letter = (sl == true or sl == 1)  -- default false
         local ioh = ui_mcm.get("rax_ammo_check/firemode/inspect_on_hold")
         mcm_inspect_on_hold = (ioh == true or ioh == 1)  -- default false
+        mcm_ron_texture = ui_mcm.get("rax_ammo_check/firemode/texture") or "ron_text"
+        mcm_ron_opacity = ui_mcm.get("rax_ammo_check/firemode/ron_opacity") or 255
+        mcm_ron_hue = ui_mcm.get("rax_ammo_check/firemode/ron_hue") or 0
+        mcm_ron_y_offset = ui_mcm.get("rax_ammo_check/firemode/ron_y_offset") or 0
     end
     apply_hud_visibility()
-end
-
--- Keep the vanilla/BHS fire-mode widget hidden across HUD rebuilds
-local function reassert_hud_hide()
-    if not mcm_hide_hud then return end
-    CreateTimeEvent("ac_fm_hud", "reassert", 0, function()
-        apply_hud_visibility()
-        return true
-    end)
-end
-
--- menu (inventory / PDA) closed: the maingame HUD is shown/redrawn again
-function GUI_on_hide()
-    reassert_hud_hide()
-end
-
--- weapon draw finished (anm_show*): the fire-mode indicator refreshes for the new active weapon. This
--- also covers load: the indicator only appears once a weapon is out, which always plays a draw anim
-function actor_on_hud_animation_end(item, section, motion, state, slot)
-    if motion and string.find(tostring(motion), "^anm_show") then
-        reassert_hud_hide()
-    end
+    set_bwais_suppressed(enabled)  -- take over the display from BWais FireModeCheck when ours is on
 end
 
 -- ### Helpers
@@ -227,16 +233,17 @@ local function build_dot_plain(mode)
     return s, FM_DOT_ON
 end
 
--- ### Ready or Not indicator (texture adapted from FireModeCheck by Ishmaeel)
--- Draws a fire-selector graphic from a 256 px tile atlas. Column = current mode (Single / Burst /
--- Full-Auto, from GetFireMode); row = selector body, derived in-script from whether the weapon has
--- a burst position: row 1 (Single/Burst/Auto) when it does, row 2 (Single/Auto) when it does not.
--- Deriving the row from the weapon's own fire_modes means it works for every weapon, with no
--- per-gun selector table to maintain (the old vanilla-only list could not cover GAMMA's packs).
+-- ### Ready or Not indicator (texture + tile mapping from BWais FireModeCheck)
+-- Draws a fire-selector graphic from a 256 px tile atlas. Column = current mode (Single 0 / Burst 1 /
+-- Full-Auto 2, from GetFireMode); row = selector body, derived in-script from whether the weapon has
+-- a burst position: row 0 (with burst) when it does, row 1 (no burst) when it does not. These row/col
+-- indices match BWais FireModeCheck's atlas layout (selector_rows / firing_mode_icons), which our RoN
+-- textures follow. Deriving the row from the weapon's own fire_modes means it works for every weapon,
+-- with no per-gun selector table to maintain (the old vanilla-only list could not cover GAMMA's packs)
 
 local FM_TILE = 256
-local FM_ROW_WITH_BURST = 1     -- selector body that has a burst position
-local FM_ROW_NO_BURST   = 2     -- selector body without a burst position
+local FM_ROW_WITH_BURST = 0     -- selector body that has a burst position (atlas row 0)
+local FM_ROW_NO_BURST   = 1     -- selector body without a burst position (atlas row 1)
 
 -- does this section's fire_modes list include a burst mode? values are the per-pull round count:
 -- burst is > 1, single is 1, full-auto is -1.
@@ -275,9 +282,10 @@ local function fm_mode_col(mode)
     return 1                          -- Burst
 end
 
--- effective render-position index for fire mode: pinned bottom-center, or the AmmoCheck position
+-- effective render-position index for fire mode: pinned to the screen bottom (index 10, lower than the
+-- default bottom-center so the two are visibly distinct), or the AmmoCheck position when "default".
 local function fm_effective_pos()
-    if mcm_position == "screen_bottom" then return 3 end
+    if mcm_position == "screen_bottom" then return 10 end
     local p = ammo_check_mcm and ammo_check_mcm.get_render_position and ammo_check_mcm.get_render_position()
     return p or 3
 end
@@ -303,24 +311,57 @@ local function fm_image_xy(pos)
     return cxl, 600
 end
 
--- "Screen Bottom" drops the RoN graphic to the very bottom edge (lower than the text bottom-center)
-local FM_IMG_BOTTOM_Y = 735
+-- "Screen Bottom" pins the graphic to the bottom edge
+local FM_IMG_BOTTOM_Y = 768 - 110
 local function fm_indicator_xy()
+    local x, y
     if mcm_position == "screen_bottom" then
-        return (1024 - FM_IMG_W) / 2, FM_IMG_BOTTOM_Y
+        x, y = (1024 - FM_IMG_W) / 2, FM_IMG_BOTTOM_Y
+    else
+        local p = (ammo_check_mcm and ammo_check_mcm.get_render_position and ammo_check_mcm.get_render_position()) or 3
+        x, y = fm_image_xy(p)
     end
-    local p = (ammo_check_mcm and ammo_check_mcm.get_render_position and ammo_check_mcm.get_render_position()) or 3
-    return fm_image_xy(p)
+    return x, y + (mcm_ron_y_offset or 0)  -- manual vertical nudge from MCM
 end
 
--- texture for the active style: red when the Color option is on, white when off; with or without
--- the baked mode text depending on the chosen Ready or Not variant
+-- texture name for the chosen Fire Mode Texture
 local function fm_ron_texture()
-    local notext = (mcm_display_style == "ready_or_not_notext")
+    if mcm_ron_texture == "bwais" then
+        return "ui\\bwais_firemode_indicators"
+    end
+    local notext = (mcm_ron_texture == "ron_notext")
     if notext then
         return mcm_color_text and "ui\\rax_ammocheck_firemode_notext_red" or "ui\\rax_ammocheck_firemode_notext_white"
     end
     return mcm_color_text and "ui\\rax_ammocheck_firemode_text_red" or "ui\\rax_ammocheck_firemode_text_white"
+end
+
+-- ARGB color for the RoN indicator from the opacity + hue MCM options. Hue 0 = neutral (white tint:
+-- the texture keeps its own color, so only the alpha applies). Hue 1..360 applies an HSV tint via
+-- SetTextureColor - best paired with the white texture variant, since the red one fights a tint
+local function fm_hsv_to_rgb(h, s, v)
+    h = (h or 0) % 360
+    local c = v * s
+    local x = c * (1 - math.abs(((h / 60) % 2) - 1))
+    local m = v - c
+    local r, g, b = 0, 0, 0
+    if     h < 60  then r, g, b = c, x, 0
+    elseif h < 120 then r, g, b = x, c, 0
+    elseif h < 180 then r, g, b = 0, c, x
+    elseif h < 240 then r, g, b = 0, x, c
+    elseif h < 300 then r, g, b = x, 0, c
+    else                r, g, b = c, 0, x end
+    return math.floor((r + m) * 255 + 0.5), math.floor((g + m) * 255 + 0.5), math.floor((b + m) * 255 + 0.5)
+end
+
+local function fm_ron_color()
+    local a = mcm_ron_opacity or 255
+    if a < 0 then a = 0 elseif a > 255 then a = 255 end
+    if (mcm_ron_hue or 0) <= 0 then
+        return GetARGB(a, 255, 255, 255)  -- neutral: keep the texture's own color, alpha only
+    end
+    local r, g, b = fm_hsv_to_rgb(mcm_ron_hue, 0.65, 1.0)
+    return GetARGB(a, r, g, b)
 end
 
 -- self-expiring image dialog, mirrors the main mod's text overlay lifecycle
@@ -345,6 +386,10 @@ function fm_indicator_hud:show(col, row, duration, ix, iy, texname)
     local x = col * FM_TILE
     local y = row * FM_TILE
     self.icon:SetTextureRect(Frect():set(x, y, x + FM_TILE, y + FM_TILE))
+    -- opacity + optional hue tint (apply after the rect; InitTexture above can reset it)
+    if self.icon.SetTextureColor then
+        pcall(function() self.icon:SetTextureColor(fm_ron_color()) end)
+    end
     _fm_vec:set(ix, iy)
     self.icon:SetWndPos(_fm_vec)
     self.icon:Show(true)
@@ -410,8 +455,8 @@ function show_fire_mode(old_fire_mode)
         return false
     end
 
-    -- Ready or Not: draw the selector graphic instead of a text/dots message
-    if mcm_display_style == "ready_or_not" or mcm_display_style == "ready_or_not_notext" then
+    -- Custom texture: draw the selected selector graphic instead of a text/dots message
+    if mcm_display_style == "custom_texture" then
         show_ready_or_not(weapon, fire_mode)
         return true
     end
