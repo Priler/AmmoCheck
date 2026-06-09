@@ -101,13 +101,40 @@ local function install_external_reload_guard()
     orig_actor_on_weapon_reload = magazines.actor_on_weapon_reload
     magazines.actor_on_weapon_reload = function(actor, wpn)
         if enabled and not okr_internal_reload and time_global() < okr_external_reload_block_until then
-            if OKR_DEBUG then printf("[AC-OKR] external reload on Reload key suppressed (One-Key owns it)") end
+            if OKR_DEBUG then printf("[AC-OKR] external reload SUPPRESSED now=%s until=%s", tostring(time_global()), tostring(okr_external_reload_block_until)) end
             return
         end
+        if OKR_DEBUG then printf("[AC-OKR] actor_on_weapon_reload PASS enabled=%s internal=%s now=%s until=%s", tostring(enabled), tostring(okr_internal_reload), tostring(time_global()), tostring(okr_external_reload_block_until)) end
         return orig_actor_on_weapon_reload(actor, wpn)
     end
     okr_reload_wrap_installed = true
     if OKR_DEBUG then printf("[AC-OKR] installed external reload guard") end
+end
+
+-- ### Compatibility layer specifically for Field Mag Loading
+-- don't ask
+local okr_fml_orig = nil
+local okr_fml_shimmed = false
+
+local function okr_fml_shim(key, bind, dis, flags)
+    if not okr_fml_orig then return end
+    bind = bind or dik_to_bind(key)
+    if enabled and (bind == key_bindings.kWPN_RELOAD
+        or (mcm_key_reload ~= DIK_keys.DIK_ESCAPE and key == mcm_key_reload)) then
+        if OKR_DEBUG then printf("[AC-OKR] FML shim swallowed Reload-bind press (key=%s bind=%s)", tostring(key), tostring(bind)) end
+        return
+    end
+    return okr_fml_orig(key, bind, dis, flags)
+end
+
+local function install_fml_shim()
+    if okr_fml_shimmed then return end
+    if not (field_mag_loading and field_mag_loading.custom_on_key_press) then return end
+    okr_fml_orig = field_mag_loading.custom_on_key_press
+    UnregisterScriptCallback("on_before_key_press", okr_fml_orig)
+    RegisterScriptCallback("on_before_key_press", okr_fml_shim)
+    okr_fml_shimmed = true
+    if OKR_DEBUG then printf("[AC-OKR] installed Field Mag Loading reload shim") end
 end
 
 function on_game_start()
@@ -121,6 +148,12 @@ end
 
 function actor_on_first_update()
     on_option_change()
+    -- Defer the Field Mag Loading shim: FML registers its handler in its OWN actor_on_first_update,
+    -- which may run after ours. Waiting a moment guarantees it is registered so we can swap it out.
+    CreateTimeEvent("ac_okr_fml", "shim", 1.0, function()
+        install_fml_shim()
+        return true
+    end)
     if OKR_DEBUG then printf("[AC-OKR] first update: enabled=%s mags_suppressed=%s", tostring(enabled), tostring(mags_handler_suppressed)) end
 end
 
@@ -145,7 +178,10 @@ function on_option_change()
     mcm_double_ms = ui_mcm.get("rax_ammo_check/onekey/doubletap_ms") or 200
 
     set_mags_handler_suppressed(enabled)
-    if enabled then install_external_reload_guard() end -- guard whatever other mod tries to fuck with the reload
+    if enabled then
+        install_external_reload_guard() -- guard whatever other mod tries to fuck with the reload
+        install_fml_shim()              -- order-independent stop for Field Mag Loading's reload handler
+    end
 end
 
 -- ### Weapon helpers
@@ -271,6 +307,7 @@ function on_before_key_press(key, bind, dis, flags)
     -- we did not make are dropped, so no spurious reload fires ahead of our tap/hold action.
     --Short window: only the foreign handler in this press must be covered; our own reload sets the bypass
     okr_external_reload_block_until = time_global() + 150
+    if OKR_DEBUG then printf("[AC-OKR] on_before_key_press: window open now=%s until=%s key=%s bind=%s", tostring(time_global()), tostring(okr_external_reload_block_until), tostring(key), tostring(bind)) end
 
     -- raise/lower the PDA when it is the active item (slot 8). The reload key is still bound, so let
     -- the engine handle it - it raises/lowers the PDA on the reload action. We just pass the key
@@ -404,14 +441,19 @@ function try_reload_weapon()
         return
     end
 
-    -- bypass the external-reload guard for this, our own, deliberate reload
+    -- bypass the external-reload guard for this, our own, deliberate reload. pcall so a throw inside
+    -- the reload cannot leave okr_internal_reload stuck true (which would silently disable the guard
+    -- for the rest of the session and let foreign reloads slip through intermittently).
     okr_internal_reload = true
-    if mags_supported(weapon) then
-        magazines.actor_on_weapon_reload(db.actor, weapon)
-    else
-        db.actor:reload_weapon()
-    end
+    local ok, err = pcall(function()
+        if mags_supported(weapon) then
+            magazines.actor_on_weapon_reload(db.actor, weapon)
+        else
+            db.actor:reload_weapon()
+        end
+    end)
     okr_internal_reload = false
+    if not ok and OKR_DEBUG then printf("[AC-OKR] try_reload_weapon error: %s", tostring(err)) end
     -- Post-reload ammo check is handled globally by the main mod's "Auto-Check After Reload"
     -- (Behaviour) option, which fires on the reload animation end for any reload, including this one.
 end
