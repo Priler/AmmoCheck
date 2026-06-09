@@ -60,6 +60,10 @@ ammo_check_override = {
         force_anim = "anm_ammo_check", force_sound = "snd_ammo_check", -- force is for "Force Bolt Cycle External Mag"
     },
 
+    ["wpn_toz106_m1"] = { anim = "anm_bore", sound = "snd_bore", delay = 0.6 },
+    ["wpn_bm16"] = { anim = "anm_bore", sound = "snd_bore" },
+    ["wpn_saiga12s"] = { anim = "anm_bore", sound = "snd_bore" },
+
     -- Other shapes you can use for any weapon:
     -- ["wpn_example_a"] = { fake_reload = true },                       -- default uses standard fake reload
     -- ["wpn_example_b"] = { fallback = true },                          -- default uses fake_reload_fallback (lower / hide)
@@ -103,6 +107,8 @@ bolt_action_rifles = {
 
     ["wpn_sks_molot"] = { delay = 1.3 },
 
+    -- ["wpn_winchester1873"] = { delay = 1.2 },
+
     -- External-mag bolt-action variants. Default: fake reload (anm_reload).
     -- With MCM "force_bolt_cycle_external_mag" ON: play explicit bolt cycle using the
     -- delay/anim below. Longer prefixes here override shorter base prefixes (e.g. wpn_k98).
@@ -126,7 +132,9 @@ bolt_action_rifles = {
 -- These play anm_open -> delay -> anm_close (pump rack)
 -- Format: [prefix] = { delay = seconds_between_open_and_close }
 pump_action_shotguns = {
-    ["wpn_ks23"] = { delay = 0.6 },
+    -- ["wpn_ks23"] = { delay = 0.6 }, -- in GAMMA 0.9.5 it now has a new animation, so anm_open/close not valid anymore
+    ["wpn_ks23"] = { anim = "anm_bore", sound = "snd_bore", delay = 0.6 }, -- bore animation fits better in GAMMA 0.9.5
+
     ["wpn_mp155"] = { delay = 0.8 },
     -- ["wpn_ithacam37"] = { delay = 0.5 },
     ["wpn_mp133"] = { delay = 0.5 },
@@ -164,6 +172,8 @@ pistol_smg_animations = {
     ["wpn_pmm_bas"] = { anim = "anm_reload", sound = "snd_reload" },
     ["wpn_pmm"] = { anim = "anm_bore", sound = "snd_reload" }, -- this one has proper mag inspect animation (anm_bore)
 
+    ["wpn_desert_eagle"] = { anim = "anm_bore", sound = "snd_bore" }, -- this one mag palms magazine, so use bore instead
+
     ["wpn_vz61"] = { anim = "anm_bore", sound = "snd_bore" }, -- don't play anim without this
     -- ["wpn_aps"] = { anim = "anm_bore", sound = "snd_bore" },
     -- ["wpn_mp5"] = { delay = 0.4 },
@@ -197,6 +207,11 @@ sniper_animations = {
 
     ["wpn_gauss"] = { anim = "anm_reload", sound = "snd_reload" },
 
+    ["wpn_sks_b"] = { anim = "anm_bore", sound = "snd_bore" },
+    ["wpn_sks_molot"] = { anim = "anm_bore", sound = "snd_bore" },
+
+    ["wpn_winchester1873"] = { anim = "anm_bore", sound = "snd_bore" },
+
     -- ["wpn_svu"] = { anim = "anm_bore", sound = "snd_bore" },
     -- ["wpn_wa2000"] = { delay = 0.5 },
 }
@@ -225,6 +240,8 @@ ignore_fake_animations = {
     ["wpn_cz75"] = true, -- drops magazine (non-immersive)
     ["wpn_m16"] = true, -- drops magazine (non-immersive)
     ["wpn_vintorez_nimble"] = true, -- drops magazine (non-immersive)
+
+    ["wpn_fal_sa58_osw"] = true, -- drops magazine (non-immersive)
 
     ["wpn_mosin"] = false,        -- vanilla Mosin: allow bolt_action_rifles handling instead of ignore fallback
     ["wpn_mosin_k"] = false,      -- Kmack Mosin Trio variant: opt back out (bolt_action_rifles handles it)
