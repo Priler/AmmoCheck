@@ -531,10 +531,21 @@ local function current_mode_index(modes, cur_value)
     return #modes - 1
 end
 
--- Fire-selector switch animation. SetFireMode is instant and never animates (engine just calls
--- SetQueueSize), so to show the selector flick we play the HUD motion ourselves. anm_switch_mode is
--- the alias the GAMMA animation packs define (e.g. hand_grot_firemode); vanilla guns do not have it.
 local FM_SWITCH_ANIM = "anm_switch_mode"
+local FM_SWITCH_STATE = 6
+
+-- Play a weapon's snd_switch_mode. Config value is "path[, vol, dist]"
+local function play_switch_sound(sec)
+    local val = SYS_GetParam(0, sec, "snd_switch_mode")
+    if not val or val == "" then return end
+    local path = val
+    local comma = string.find(path, ",", 1, true)
+    if comma then path = string.sub(path, 1, comma - 1) end
+    path = path:gsub("%s+$", "")  -- trim trailing whitespace from the ltx value
+    if path == "" then return end
+    local snd = sound_object(path)
+    if snd then snd:play(db.actor, 0, sound_object.s2d) end
+end
 
 -- index here is a 0-based slot in the weapon's fire_modes list. Negative is never passed: SetFireMode
 -- only wraps past the end, a negative index would index out of bounds, so prev-wrap is done by caller.
@@ -542,12 +553,40 @@ local function apply_fire_mode(weapon, index)
     local wm = weapon and weapon:cast_WeaponMagazined()
     if not wm then return end
     wm:SetFireMode(index)
-    -- Play the selector switch anim only when the weapon's HUD actually defines it; weapons without
-    -- it (vanilla) just keep the instant change with no animation and no error. play_hud_motion leaves
-    -- the weapon logically idle (state stays 0), so the on-screen mode text still displays normally.
-    if weapon.play_hud_motion and animation_common and animation_common.has_animation
-       and animation_common.has_animation(weapon:section(), FM_SWITCH_ANIM) then
-        weapon:play_hud_motion(FM_SWITCH_ANIM, true, 0, 1, 0)
+
+    local sec = weapon:section()
+    local hud = SYS_GetParam(0, sec, "hud") or sec
+
+    -- HUD switch animation. anm_switch_mode is the alias the engine itself plays on the fire-mode key path
+    --
+    -- Prefer the _empty variant when the magazine is empty, mirroring the engine.
+    if weapon.play_hud_motion then
+        local empty = (weapon:get_ammo_in_magazine() == 0)
+        local anm
+        if empty and SYS_GetParam(0, hud, FM_SWITCH_ANIM .. "_empty") then
+            anm = FM_SWITCH_ANIM .. "_empty"
+        elseif SYS_GetParam(0, hud, FM_SWITCH_ANIM) then
+            anm = FM_SWITCH_ANIM
+        end
+        if anm then
+            weapon:play_hud_motion(anm, true, FM_SWITCH_STATE, 1, 0)
+        end
+    end
+
+    -- Switch sound: the engine plays snd_switch_mode on EVERY switch (with or without the anim), but
+    -- only on its native fire-mode key path. So replicate the behaviour :3
+    play_switch_sound(sec)
+
+    -- Camera Reanimation Project mod compatibility
+    -- camera_reanim_project adds a small fire-mode camera
+    -- effector, but only when the ENGINE kWPN_FIREMODE keys are pressed.
+    -- So replicate the behaviour :3 when that mod is installed and its fire-mode option is on
+    if camera_reanim_project and camera_reanim_project.play_switch_anm then
+        local cam_on = true
+        if camera_reanim_project_mcm and camera_reanim_project_mcm.get_config then
+            cam_on = camera_reanim_project_mcm.get_config("fire_mode")
+        end
+        if cam_on then camera_reanim_project.play_switch_anm() end
     end
 end
 
