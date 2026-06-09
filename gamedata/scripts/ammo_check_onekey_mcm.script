@@ -526,9 +526,6 @@ end
 
 -- ### Ammo data
 
--- cache of usable ammo sections per weapon id
-local cached_ammo_types = {}
-
 function get_ammo_data(weapon, include_loaded)
     local id = weapon:id()
     local section = weapon:section()
@@ -554,11 +551,10 @@ function get_ammo_data(weapon, include_loaded)
         end
     end
 
-    local ammo_types = cached_ammo_types[id]
-    if not ammo_types then
-        ammo_types = utils_item.get_ammo(section, id)
-        cached_ammo_types[id] = ammo_types
-    end
+    -- no per-id caching here: with an id the lookup walks the engine's live ammo list, which
+    -- is upgrade-aware (a caliber-conversion upgrade changes it mid-session)
+    --One engine call per ammo-switch press is negligible; a cached copy would go stale after such an upgrade.
+    local ammo_types = utils_item.get_ammo(section, id)
 
     local num_avail = 0
     local has_ammo_types = {}

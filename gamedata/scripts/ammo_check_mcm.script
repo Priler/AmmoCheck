@@ -1421,7 +1421,18 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
                 currentAmmo = #mag_data.loaded
             end
 
-            if magazines_mcm and magazines_mcm.get_config("retain_round") then
+            -- Per-weapon retain check: Mags only retains a chamber round on closed-bolt weapons
+            -- (its own retain_round(weapon) is the config flag AND not open-bolt).
+            -- A raw config read would wrongly subtract a chamber round on open-bolt weapons (full mag reading
+            -- one short, wrong top-round name)
+            -- So we fall back to the raw config on older Mags builds that lack the per-weapon function bruh
+            local mag_retains_chamber
+            if magazines and magazines.retain_round then
+                mag_retains_chamber = magazines.retain_round(weapon)
+            else
+                mag_retains_chamber = magazines_mcm and magazines_mcm.get_config("retain_round")
+            end
+            if mag_retains_chamber then
                 -- with retain_round: last in array is chambered, second-to-last is magazine top.
                 -- the chamber is always present, so the fill level must use (loaded - 1).
                 mag_has_chamber = true
@@ -1783,6 +1794,13 @@ function actor_on_hud_animation_end(item, section, motion, state, slot)
         ac_end_reload_block()
     end
 
+    -- Path A inspect finished: clear the flag here, not only at the next check_Ammo. Left set,
+    -- it would keep hide_msg_on_inspect suppressing unrelated later messages (e.g. every auto-check after reload).
+    -- Only one weapon HUD anim plays at a time, so any weapon anim ending while the flag is set means the inspect is over.
+    if ac_pending_inspect_anim_playing and item and IsWeapon(item) then
+        ac_pending_inspect_anim_playing = false
+    end
+
     -- stop empty mag sound if playing (handles cancelled animations)
     if empty_mag_sound and empty_mag_sound:playing() then
         empty_mag_sound:stop()
@@ -2047,7 +2065,7 @@ function debug_list_animations()
         end
     end
     
-    local msg = sec .. ":\\n" .. table.concat(found, ", ")
+    local msg = sec .. ":\n" .. table.concat(found, ", ")
     db.actor:give_game_news("AmmoCheck Debug - Animations", msg, "ui_inGame2_D_Ohotnik_na_mutantov", 0, 8000, 0)
     
     -- also print to console for full details
@@ -2340,10 +2358,10 @@ function on_option_change()
         render_position = ui_mcm.get("rax_ammo_check/display/render_position") or 3
         render_cursor_gap = ui_mcm.get("rax_ammo_check/display/render_cursor_gap") or 80
         reset_ac_overlay()  -- rebuild on next show with current font/position settings
-        show_ammo_type = ui_mcm.get("rax_ammo_check/display/show_ammo_type")
-        if show_ammo_type == nil then show_ammo_type = true end
-        show_ammo_tag = ui_mcm.get("rax_ammo_check/display/show_ammo_tag")
-        if show_ammo_tag == nil then show_ammo_tag = true end
+        local show_type_val = ui_mcm.get("rax_ammo_check/display/show_ammo_type")
+        show_ammo_type = (show_type_val == true or show_type_val == 1)  -- default false (matches MCM def)
+        local show_tag_val = ui_mcm.get("rax_ammo_check/display/show_ammo_tag")
+        show_ammo_tag = (show_tag_val == true or show_tag_val == 1 or show_tag_val == nil)  -- default true
         local chamber_val = ui_mcm.get("rax_ammo_check/display/show_chamber_ammo")
         show_chamber_ammo = (chamber_val == true or chamber_val == 1)  -- default false
         local chamber_mismatch_val = ui_mcm.get("rax_ammo_check/display/show_chamber_mismatch")
@@ -2353,14 +2371,16 @@ function on_option_change()
         msg_duration = ui_mcm.get("rax_ammo_check/display/msg_duration") or 2
         
         -- hud settings
-        hide_counter = ui_mcm.get("rax_ammo_check/hud_behavior/hidecounter")
-        if hide_counter == nil then hide_counter = true end
-        hide_ammo_icon = ui_mcm.get("rax_ammo_check/hud_behavior/hideicon")
-        if hide_ammo_icon == nil then hide_ammo_icon = true end
-        
+        local hide_counter_val = ui_mcm.get("rax_ammo_check/hud_behavior/hidecounter")
+        hide_counter = (hide_counter_val == true or hide_counter_val == 1 or hide_counter_val == nil)  -- default true
+        local hide_icon_val = ui_mcm.get("rax_ammo_check/hud_behavior/hideicon")
+        hide_ammo_icon = (hide_icon_val == true or hide_icon_val == 1 or hide_icon_val == nil)  -- default true
+
         -- behavior settings
-        check_grenade_mode = ui_mcm.get("rax_ammo_check/hud_behavior/check_grenade_mode")
-        auto_check_reload = ui_mcm.get("rax_ammo_check/hud_behavior/auto_check_reload")
+        local gren_check_val = ui_mcm.get("rax_ammo_check/hud_behavior/check_grenade_mode")
+        check_grenade_mode = (gren_check_val == true or gren_check_val == 1)  -- default false
+        local auto_check_val = ui_mcm.get("rax_ammo_check/hud_behavior/auto_check_reload")
+        auto_check_reload = (auto_check_val == true or auto_check_val == 1)  -- default false
         
         -- animation settings
         local enable_val = ui_mcm.get("rax_ammo_check/animation/enable_animations")
@@ -2394,7 +2414,8 @@ function on_option_change()
         print_dbg("Animation settings: enable=%s, anim_mode=%s, no_mag_fb=%s, fake_fb=%s, bolt=%s, bolt_eject=%s, pump=%s, pump_eject=%s, ignore=%s", tostring(enable_animations), anim_mode, no_magazine_fallback, fake_reload_fallback, tostring(fake_reload_bolt_cycle), tostring(fake_reload_bolt_eject), tostring(fake_reload_pump_rack), tostring(fake_reload_pump_eject), tostring(fake_reload_ignore_list))
         
         -- debug settings
-        debug_mode = ui_mcm.get("rax_ammo_check/debug/debug_mode")
+        local debug_val = ui_mcm.get("rax_ammo_check/debug/debug_mode")
+        debug_mode = (debug_val == true or debug_val == 1)  -- default false
         
         -- keybind settings
         if mcm_keybinds then
@@ -2929,12 +2950,6 @@ function check_Ammo(skip_animation)
         if ac_overlay then ac_overlay:hide() end
     end
 
-    -- Arm cooldown for this check. Fixed window regardless of msg_duration so the player
-    -- can re-trigger quickly; the message may visually outlive the cooldown
-    ac_cooldown_until = now + AC_COOLDOWN_MS
-    ac_last_weapon_id = weapon:id()
-    ac_message_until = 0  -- reset; will be set by display_ammo_status when the new message displays
-
     local weaponId = weapon:id()
     local sec = weapon:section()
     local currentState = weapon:get_state()
@@ -2943,12 +2958,20 @@ function check_Ammo(skip_animation)
 
     -- if weapon is busy (animation playing), just show message without animation
     local weapon_busy = (currentState ~= 0)
-    
+
     -- if in grenade mode and check is disabled, return
     if in_grenade_mode and not check_grenade_mode then return end
 
     local currentAmmo = weapon:get_ammo_in_magazine()
     if not currentAmmo then return end
+
+    -- Arm cooldown for this check, AFTER the validation returns above so a no-op press
+    -- (e.g. grenade mode with its check disabled) cannot silently lock out the next 3s.
+    -- Fixed window regardless of msg_duration so the player can re-trigger quickly; the
+    -- message may visually outlive the cooldown
+    ac_cooldown_until = now + AC_COOLDOWN_MS
+    ac_last_weapon_id = weaponId
+    ac_message_until = 0  -- reset; will be set by display_ammo_status when the new message displays
 
     -- get ammo status using shared function
     local message, clr, ammo_type, separate_tag, segments = get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
