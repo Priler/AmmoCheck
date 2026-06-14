@@ -1,6 +1,5 @@
 -- AmmoCheck: One-Key Fire Mode (ported from One-Key Weapon Controls)
--- Optional feature, disabled by default. A single key cycles the weapon fire mode and shows the new
--- mode on screen; modifier + key cycles backwards; hold the key to show the current mode.
+-- Optional feature, disabled by default. The fire-mode key multiplexes into tap / double-tap / hold as well
 -- The key is its own MCM bind (default X), NOT the reload key, so there is no engine conflict.
 -- MCM options live in ammo_check_mcm.script (the rax_ammo_check page); this script reads them.
 
@@ -13,7 +12,12 @@ local mcm_display_style  = "text"       -- "text", "none", "dots", "dots_alt", o
 local mcm_ron_texture    = "ron_text"   -- which graphic the "Custom texture" style draws: ron_text / ron_notext
 local mcm_show_letter    = false        -- append the mode letter [S]/[B]/[A] to the message
 local mcm_position       = "default"    -- "default" (follow AmmoCheck) or "screen_bottom"
-local mcm_inspect_on_hold = false        -- hold the key to inspect the weapon instead of showing the mode
+-- tap / double-tap / hold each pick from the SAME action set: none / switch / check / inspect
+local mcm_tap_action       = "switch"   -- single tap (modifier reverses the switch direction)
+local mcm_doubletap_action = "none"
+local mcm_hold_action      = "check"    -- default hold shows the current mode (old "show on hold")
+local mcm_hold_ms          = 200        -- hold this long (ms) to trigger the hold action
+local mcm_double_ms        = 200        -- second tap within this window (ms) counts as a double-tap
 local mcm_ron_opacity    = 255          -- Ready or Not indicator alpha 0..255
 local mcm_ron_hue        = 0            -- Ready or Not indicator hue tint 0..360 (0 = neutral/no tint)
 local mcm_ron_y_offset   = 0            -- manual vertical nudge (px) for the custom texture indicator
@@ -26,8 +30,9 @@ local MSG_DURATION = 2
 function on_game_start()
     RegisterScriptCallback("actor_on_first_update", actor_on_first_update)
     RegisterScriptCallback("on_option_change", on_option_change)
-    RegisterScriptCallback("on_before_key_press", on_before_key_press)
+    RegisterScriptCallback("on_key_press", on_key_press)
     RegisterScriptCallback("on_key_hold", on_key_hold)
+    RegisterScriptCallback("on_key_release", on_key_release)
 end
 
 function actor_on_first_update()
@@ -85,8 +90,11 @@ function on_option_change()
         mcm_position = ui_mcm.get("rax_ammo_check/firemode/position") or "default"
         local sl = ui_mcm.get("rax_ammo_check/firemode/show_letter")
         mcm_show_letter = (sl == true or sl == 1)  -- default false
-        local ioh = ui_mcm.get("rax_ammo_check/firemode/inspect_on_hold")
-        mcm_inspect_on_hold = (ioh == true or ioh == 1)  -- default false
+        mcm_tap_action = ui_mcm.get("rax_ammo_check/firemode/tap_action") or "switch"
+        mcm_doubletap_action = ui_mcm.get("rax_ammo_check/firemode/doubletap_action") or "none"
+        mcm_hold_action = ui_mcm.get("rax_ammo_check/firemode/hold_action") or "check"
+        mcm_hold_ms = ui_mcm.get("rax_ammo_check/firemode/hold_ms") or 200
+        mcm_double_ms = ui_mcm.get("rax_ammo_check/firemode/doubletap_ms") or 200
         mcm_ron_texture = ui_mcm.get("rax_ammo_check/firemode/texture") or "ron_text"
         mcm_ron_opacity = ui_mcm.get("rax_ammo_check/firemode/ron_opacity") or 255
         mcm_ron_hue = ui_mcm.get("rax_ammo_check/firemode/ron_hue") or 0
@@ -608,6 +616,40 @@ function prev_fire_mode(weapon, old_fire_mode)
     CreateTimeEvent("ac_firemode", "show_delayed", 0, show_fire_mode, nil)
 end
 
+-- fire_mode values are the per-pull round count: single is 1, an N-round burst is N (> 1), full-auto is -1.
+-- 0-based slot of the first mode whose value satisfies pred, or nil when the list has none
+local function find_mode_index(modes, pred)
+    for i = 1, #modes do
+        local v = tonumber(modes[i])
+        if v and pred(v) then return i - 1 end
+    end
+    return nil
+end
+
+-- Jump straight to a specific fire mode (by predicate) instead of cycling
+local function set_fire_mode_by(weapon, old_fire_mode, pred)
+    local modes = effective_fire_modes(weapon)
+    if not (modes and #modes > 1) then return false end
+    local idx = find_mode_index(modes, pred)
+    if not idx then return false end
+    if tonumber(modes[idx + 1]) ~= old_fire_mode then
+        apply_fire_mode(weapon, idx)
+    end
+    CreateTimeEvent("ac_firemode", "show_delayed", 0, show_fire_mode, nil)
+    return true
+end
+
+-- Force single fire (value 1)
+function set_single_fire_mode(weapon, old_fire_mode)
+    return set_fire_mode_by(weapon, old_fire_mode, function(v) return v == 1 end)
+end
+
+-- Prefer full-auto (-1); fall back to a burst mode (> 1); otherwise leave the mode unchanged
+function set_auto_or_burst_fire_mode(weapon, old_fire_mode)
+    if set_fire_mode_by(weapon, old_fire_mode, function(v) return v == -1 end) then return true end
+    return set_fire_mode_by(weapon, old_fire_mode, function(v) return v > 1 end)
+end
+
 -- Play a weapon-inspection animation (Tarkov inspired "look the gun over" anim) instead of showing the
 -- fire mode. Tries the common inspect motions; anm_bore is the near-universal idle inspect. Returns
 -- true if one was played, false if the weapon has none (caller then falls back to showing the mode)
@@ -628,44 +670,121 @@ local function inspect_weapon(weapon)
 end
 
 -- ### Input
+--
+-- Deterministic tap / double-tap / hold state machine, the same approach the One-Key feature uses
+local fm_down_t       = 0      -- time_global of the current press, 0 when idle
+local fm_hold_fired   = false  -- the hold action already fired for this press
+local fm_last_press_t = 0      -- time_global of the previous press, for double-tap detection
+local fm_pending_tap  = false  -- a single-tap action is scheduled
 
-function on_before_key_press(key, bind, dis, flags)
+-- Run one configured action: tap / double-tap / hold all pick from the same set, so a single
+-- dispatcher serves all three. "none" (and anything unknown) does nothing
+local function do_fm_action(action, weapon)
+    if not action or action == "none" then return end
+    weapon = weapon or (db.actor and db.actor:active_item())
+    if not is_supported_weapon(weapon) then return end
+
+    if action == "switch" then
+        -- cycle the fire mode (modifier reverses direction). No-op on a single-mode weapon or while busy
+        if not (has_multiple_fire_modes(weapon) and is_weapon_ready(weapon)) then return end
+        local old_fire_mode = weapon:cast_Weapon():GetFireMode()
+        if ui_mcm.get_mod_key(mcm_modifier_prev) then
+            prev_fire_mode(weapon, old_fire_mode)
+        else
+            next_fire_mode(weapon, old_fire_mode)
+        end
+    elseif action == "set_single" then
+        -- force single fire. No-op while busy or on a single-mode weapon
+        if not is_weapon_ready(weapon) then return end
+        set_single_fire_mode(weapon, weapon:cast_Weapon():GetFireMode())
+    elseif action == "set_auto" then
+        -- force full-auto, falling back to burst; leaves the mode unchanged if the weapon has neither
+        if not is_weapon_ready(weapon) then return end
+        set_auto_or_burst_fire_mode(weapon, weapon:cast_Weapon():GetFireMode())
+    elseif action == "check" then
+        show_fire_mode(nil)
+    elseif action == "inspect" then
+        -- play the look-over animation; fall back to showing the mode when busy or no inspect anim exists
+        if is_weapon_ready(weapon) and inspect_weapon(weapon) then return end
+        show_fire_mode(nil)
+    end
+end
+
+local function fm_clear_pending()
+    RemoveTimeEvent("ac_fm_single", "tap")
+    fm_pending_tap = false
+end
+
+-- deferred single-tap action: runs mcm_double_ms after release unless a double-tap cancelled it
+function fm_do_single_action()
+    if fm_pending_tap then
+        fm_pending_tap = false
+        fm_last_press_t = 0
+        do_fm_action(mcm_tap_action, db.actor and db.actor:active_item())
+    end
+    return true
+end
+
+function on_key_press(key)
     if not (enabled and ui_mcm) then return end
     if mcm_key == DIK_keys.DIK_ESCAPE then return end  -- unbound (set to none)
     if key ~= mcm_key then return end
 
     local weapon = db.actor and db.actor:active_item()
-    if not is_supported_weapon(weapon) then
-        flags.ret_value = true
+    if not is_supported_weapon(weapon) then return end
+
+    local now = time_global()
+
+    -- second press inside the window: double-tap. Cancel the pending single, run the double-tap action
+    if mcm_doubletap_action ~= "none" and fm_last_press_t > 0 and (now - fm_last_press_t) <= mcm_double_ms then
+        fm_clear_pending()
+        fm_last_press_t = 0
+        fm_down_t = 0
+        do_fm_action(mcm_doubletap_action, weapon)
         return
     end
 
-    if has_multiple_fire_modes(weapon) and is_weapon_ready(weapon) then
-        local old_fire_mode = weapon:cast_Weapon():GetFireMode()
-        if ui_mcm.get_mod_key(mcm_modifier_prev) then
-            ui_mcm.simple_press("ac_firemode_press", key, prev_fire_mode, weapon, old_fire_mode)
-        else
-            ui_mcm.simple_press("ac_firemode_press", key, next_fire_mode, weapon, old_fire_mode)
-        end
-        flags.ret_value = false
-        return
-    end
-
-    flags.ret_value = true
+    fm_last_press_t = now
+    fm_down_t = now
+    fm_hold_fired = false
 end
 
 function on_key_hold(key)
     if not (enabled and ui_mcm) then return end
     if mcm_key == DIK_keys.DIK_ESCAPE then return end  -- unbound
-    if key == mcm_key and ui_mcm.key_hold("ac_firemode_hold", key) then
-        -- Inspect-on-hold: play the weapon inspection animation instead of showing the mode. Falls
-        -- back to showing the mode when off, the weapon is busy, or it has no inspect animation
-        if mcm_inspect_on_hold then
-            local weapon = db.actor and db.actor:active_item()
-            if is_supported_weapon(weapon) and is_weapon_ready(weapon) and inspect_weapon(weapon) then
-                return
-            end
-        end
-        show_fire_mode(nil)
+    if key ~= mcm_key then return end
+    if mcm_hold_action == "none" then return end  -- no dedicated hold action; release runs the tap
+    if fm_down_t > 0 and (not fm_hold_fired) and (time_global() - fm_down_t) >= mcm_hold_ms then
+        fm_hold_fired = true
+        fm_clear_pending()
+        fm_last_press_t = 0
+        fm_down_t = 0
+        do_fm_action(mcm_hold_action)
+    end
+end
+
+function on_key_release(key)
+    if not (enabled and ui_mcm) then return end
+    if mcm_key == DIK_keys.DIK_ESCAPE then return end  -- unbound
+    if key ~= mcm_key then return end
+
+    -- hold already handled this press: nothing to do
+    if fm_hold_fired then
+        fm_hold_fired = false
+        fm_down_t = 0
+        return
+    end
+
+    -- press was consumed by a double-tap (or never registered): nothing pending
+    if fm_down_t == 0 then return end
+    fm_down_t = 0
+
+    -- short tap: act now when there is no double-tap window to wait for, otherwise defer so a quick
+    -- second tap can convert it to the double-tap action
+    fm_pending_tap = true
+    if mcm_doubletap_action == "none" then
+        fm_do_single_action()
+    else
+        CreateTimeEvent("ac_fm_single", "tap", mcm_double_ms / 1000, fm_do_single_action)
     end
 end

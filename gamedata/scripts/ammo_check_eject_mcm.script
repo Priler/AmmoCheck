@@ -1,0 +1,387 @@
+-- Ammo Check - Eject Chambered Round
+-- Optional feature: one keybind ejects the round currently in the chamber back into the
+-- inventory and chambers the next round from the magazine.
+-- Useful after a mag swap with "1 in chamber" enabled: the old round (e.g. FMJ) stays chambered in front of the new
+-- mag (e.g. AP); one eject makes the next shot come from the new mag.
+
+local enabled       = false
+local mcm_key       = nil   -- DIK code; DIK_ESCAPE means unbound
+local mcm_modifier  = 0     -- 0 none, 1 shift, 2 ctrl, 3 alt (ui_mcm.get_mod_key)
+local camera_anim   = true  -- play the camera motion on non-bolt weapons
+local auto_eject    = false -- after a reload, auto eject a chambered round that mismatches the new mag
+local debug_mode    = false
+
+local time_global   = time_global
+local ZERO_VECTOR   = vector():set(0, 0, 0)
+
+local EJECT_COOLDOWN_MS = 1500  -- ignore re-presses while the eject animation plays
+local eject_cooldown_until = 0
+
+local det_active = nil  -- detector hidden for the bolt-cycle animation, restored after
+
+local function print_dbg(text, ...)
+    if debug_mode then
+        printf("![AC-EJ] %s | " .. text, time_global(), ...)
+    end
+end
+
+-- ### MCM
+
+function on_option_change()
+    if not ui_mcm then return end
+    local en = ui_mcm.get("rax_ammo_check/eject/enable")
+    enabled = (en == true or en == 1)
+    mcm_key = ui_mcm.get("rax_ammo_check/eject/key") or DIK_keys.DIK_ESCAPE
+    mcm_modifier = ui_mcm.get("rax_ammo_check/eject/modifier") or 0
+    local cam = ui_mcm.get("rax_ammo_check/eject/camera_anim")
+    camera_anim = (cam == true or cam == 1 or cam == nil)  -- default true
+    local ae = ui_mcm.get("rax_ammo_check/eject/auto_eject")
+    auto_eject = (ae == true or ae == 1)
+    local dbg = ui_mcm.get("rax_ammo_check/debug/debug_mode")
+    debug_mode = (dbg == true or dbg == 1)
+end
+
+function actor_on_first_update()
+    on_option_change()
+end
+
+-- ### Animation helpers
+
+local function has_animation(sec, anm)
+    local hud = SYS_GetParam(0, sec, "hud") or sec
+    return SYS_GetParam(0, hud, anm)
+end
+
+local function play_motion(weapon, anm)
+    local ok, err = pcall(function()
+        weapon:play_hud_motion(anm, true, 0, 1, 0)
+    end)
+    if not ok then
+        print_dbg("play_motion: failed to play %s on %s: %s", anm, weapon:section(), tostring(err))
+    end
+    return ok
+end
+
+-- play a weapon ltx sound param (snd_open_weapon / snd_close_weapon style values)
+local function play_section_sound(sec, param)
+    local val = ini_sys:r_string_ex(sec, param)
+    if not val or val == "$no_sound" then return end
+    local comma = string.find(val, ",", 1, true)
+    if comma then val = string.sub(val, 1, comma - 1) end
+    val = val:gsub("%s+$", "")
+    if val == "" then return end
+    local snd = sound_object(val)
+    if snd then
+        snd:play_no_feedback(db.actor, sound_object.s2d, 0, ZERO_VECTOR, 1.0, 1.0)
+    end
+end
+
+-- the rack/eject sound Mags Redux uses for hand-chambering; its ogg ships with that mod,
+-- so gate on the mod's presence rather than risking a missing-sound error standalone
+local function play_rack_sound()
+    if magazines and utils_obj and utils_obj.play_sound then
+        utils_obj.play_sound("handgun_unjam")
+    end
+end
+
+local function restore_detector()
+    if det_active then
+        if db.actor then db.actor:show_detector(true) end
+        det_active = nil
+    end
+    return true
+end
+
+local function hide_detector()
+    det_active = db.actor:active_detector() or nil
+    if det_active then det_active:switch_state(2) end
+end
+
+-- show the updated ammo status once the animation is over
+local function schedule_status(delay)
+    if not (ammo_check_mcm and ammo_check_mcm.check_Ammo_silent) then return end
+    RemoveTimeEvent("ac_eject", "status")
+    CreateTimeEvent("ac_eject", "status", delay, function()
+        ammo_check_mcm.check_Ammo_silent()
+        return true
+    end)
+end
+
+-- pick and play the eject animation; returns the delay (s) until the status message
+local function play_eject_animation(weapon)
+    local sec = weapon:section()
+
+    -- per-weapon bolt/pump config from the ammo check weapon tables (custom anim + timing)
+    local cfg = ammo_check_weapons.get_bolt_action_config(sec)
+              or ammo_check_weapons.get_pump_action_config(sec)
+    local delay = (cfg and cfg.delay) or 0.7
+
+    -- priority 1: the weapon's dedicated cycle animation from the config tables
+    if cfg and cfg.anim and has_animation(sec, cfg.anim) then
+        print_dbg("eject anim for %s: custom %s", sec, cfg.anim)
+        hide_detector()
+        play_motion(weapon, cfg.anim)
+        if cfg.sound then play_section_sound(sec, cfg.sound) end
+        -- round-out sound roughly when the cycle reaches its apex
+        RemoveTimeEvent("ac_eject", "rack_snd")
+        CreateTimeEvent("ac_eject", "rack_snd", 0.6, function()
+            play_rack_sound()
+            return true
+        end)
+        CreateTimeEvent("ac_eject", "restore_det", 1.2, restore_detector)
+        return 1.2
+    end
+
+    -- priority 2: generic bolt/pump cycle, anm_open then delay then anm_close
+    if has_animation(sec, "anm_open") and has_animation(sec, "anm_close") then
+        print_dbg("eject anim for %s: open/close cycle, %.2fs", sec, delay)
+        hide_detector()
+        play_motion(weapon, "anm_open")
+        play_section_sound(sec, "snd_open_weapon")
+        -- capture the id, not the object: the weapon may be dropped or switched before the
+        -- close fires, and method calls on a stale game object reference can crash
+        local wpn_id = weapon:id()
+        RemoveTimeEvent("ac_eject", "close")
+        CreateTimeEvent("ac_eject", "close", delay, function()
+            local w = db.actor and db.actor:active_item()
+            if w and w:id() == wpn_id then
+                -- the round leaves at the open apex, right before the bolt closes
+                play_rack_sound()
+                play_motion(w, "anm_close")
+                play_section_sound(sec, "snd_close_weapon")
+            end
+            CreateTimeEvent("ac_eject", "restore_det", 0.4, restore_detector)
+            return true
+        end)
+        return delay + 0.5
+    end
+
+    -- priority 3: no usable weapon animation; camera motion (MCM toggle) + rack sound.
+    -- Camera Reanimation Project's own play_switch_anm() is gated for the fire-mode key:
+    -- it returns early on single-fire-mode weapons and on weapons with anm_switch_mode,
+    -- which filters out most guns this path serves. Play its camera motion file directly;
+    -- the mod's presence guarantees the .anm exists (it ships camera_effects\fmode_crp.anm).
+    if camera_anim and camera_reanim_project then
+        print_dbg("eject anim for %s: camera motion", sec)
+        local ok, err = pcall(function()
+            game.play_hud_anm("camera_effects\\fmode_crp.anm", 2, 2, 1, false, false)
+        end)
+        if not ok then
+            print_dbg("eject camera motion failed: %s", tostring(err))
+        end
+    end
+    play_rack_sound()
+    return 0.5
+end
+
+-- ### Core
+
+-- Data-only eject: removes the chambered round from the weapon (and from the Mags Redux
+-- tracked magazine when present), spawns that round back into the actor's inventory, and
+-- rechambers the next round
+-- Deliberately NOT gated on retain_round: a tracked mag desyncs from the engine count on
+-- any engine-side eject regardless of that option, so the mag stack must always be popped
+function eject_round_data(weapon)
+    local actor = db.actor
+    if not (actor and weapon) then return nil end
+
+    local ammo = weapon:get_ammo_in_magazine()
+    if not ammo or ammo <= 0 then return nil end
+
+    local id = weapon:id()
+    local ejected
+
+    if magazines and magazine_binder and magazine_binder.is_supported_weapon(weapon) then
+        local mag_data = magazine_binder.get_mag_loaded(id)
+        if mag_data and #mag_data.loaded > 0 then
+            -- last element of mag_data.loaded is the chambered round: remove it
+            ejected = mag_data.loaded[#mag_data.loaded]
+            mag_data.loaded[#mag_data.loaded] = nil
+            magazine_binder.set_data(id, mag_data)
+            if #mag_data.loaded > 0 then
+                -- chamber the new top round: sets the engine ammo type and count to match
+                magazines.prep_weapon(weapon, false)
+            else
+                weapon:set_ammo_elapsed(0)
+            end
+        else
+            -- no tracked rounds (mag ejected, chamber-retained round only): the round
+            -- exists engine-side only, identified by the weapon's current ammo type
+            ejected = magazines.get_sec_chambered(weapon)
+            if not ejected then return nil end
+            weapon:set_ammo_elapsed(ammo - 1)
+        end
+    else
+        -- vanilla weapon: the current ammo type identifies the chambered round
+        local list = utils_item.get_ammo(weapon:section(), id)
+        ejected = list and list[weapon:get_ammo_type() + 1]
+        if not ejected then return nil end
+        weapon:set_ammo_elapsed(ammo - 1)
+    end
+
+    alife_create_item(ejected, actor, { ammo = 1 })
+    return ejected
+end
+
+function eject_one_round()
+    local actor = db.actor
+    if not actor then return end
+
+    local weapon = actor:active_item()
+    if not (weapon and IsWeapon(weapon)) then return end
+    if IsItem("fake_ammo_wpn", nil, weapon) then return end
+    if weapon:weapon_in_grenade_mode() then return end
+    if weapon:get_state() ~= 0 then return end  -- idle only
+
+    if magazines and magazine_binder then
+        if magazines.action_in_progress and magazines.action_in_progress() then return end
+        if magazine_binder.is_supported_weapon(weapon) and not magazines.retain_round(weapon) then
+            print_dbg("eject: retain_round off (or open bolt), ignoring")
+            return
+        end
+    end
+
+    local now = time_global()
+    if now < eject_cooldown_until then return end
+
+    local ejected = eject_round_data(weapon)
+    if not ejected then
+        print_dbg("eject: chamber empty on %s", weapon:section())
+        return
+    end
+
+    print_dbg("ejected %s from %s, %d rounds left", ejected, weapon:section(), weapon:get_ammo_in_magazine())
+
+    eject_cooldown_until = now + EJECT_COOLDOWN_MS
+    local msg_delay = play_eject_animation(weapon)
+    schedule_status(msg_delay)
+end
+
+-- ### Auto eject after reload
+--
+-- With retain_round on, a mag swap pushes the OLD chambered round onto the top of the new
+-- mag's stack, so after the reload the chamber holds the old type in front of the new mag
+-- (e.g. one FMJ over a full AP mag).
+-- When the option is on, detect that right after the reload finishes (top of loaded vs the round below it)
+-- and rack the old round out into the inventory with the regular eject animation
+--
+-- The actor_on_weapon_reload callback fires at reload START (the engine refires it on
+-- switch_state(7), which is why Mags' own handler self-guards on state 7), so we poll
+-- until the weapon returns to idle before checking. Covers every reload path: reload key, One-Key, inventory drag-drop, mag-selector UIs
+
+local AUTO_EJECT_TIMEOUT_MS = 10000  -- give up if the weapon never settles (interrupted reload etc)
+local auto_started_at  = 0
+local auto_saw_reload  = false       -- reload state actually observed; guards against false starts
+local auto_wpn_id      = nil
+
+local function auto_eject_check()
+    local actor = db.actor
+    if not actor then return true end
+
+    local weapon = actor:active_item()
+    if not (weapon and IsWeapon(weapon)) then return true end
+    if auto_wpn_id and weapon:id() ~= auto_wpn_id then return true end  -- weapon switched, abort
+
+    local now = time_global()
+    if now > auto_started_at + AUTO_EJECT_TIMEOUT_MS then return true end
+
+    local state = weapon:get_state()
+    if state == 7 then
+        auto_saw_reload = true
+        return false  -- reload running, keep waiting
+    end
+    if state ~= 0 then return false end  -- some other animation, keep waiting
+    if not auto_saw_reload then
+        -- idle but the reload never started yet: wait a short grace, then call it a false start
+        return now > auto_started_at + 2000
+    end
+
+    -- reload done, weapon idle: check chamber vs the next round in the new mag
+    if weapon:weapon_in_grenade_mode() then return true end
+    if not (magazines and magazine_binder) then return true end
+    -- mags may still be finishing the load bookkeeping a few frames after the weapon goes
+    -- idle: wait instead of giving up (the overall deadline still caps this)
+    if magazines.action_in_progress and magazines.action_in_progress() then return false end
+    if not magazine_binder.is_supported_weapon(weapon) then return true end
+    if not magazines.retain_round(weapon) then return true end
+
+    local mag_data = magazine_binder.get_mag_loaded(weapon:id())
+    if not (mag_data and #mag_data.loaded >= 2) then return true end
+    local top   = mag_data.loaded[#mag_data.loaded]
+    local below = mag_data.loaded[#mag_data.loaded - 1]
+    if top == below then return true end
+
+    print_dbg("auto eject: chambered %s mismatches next mag round %s", tostring(top), tostring(below))
+    local ejected = eject_round_data(weapon)
+    if ejected then
+        eject_cooldown_until = time_global() + EJECT_COOLDOWN_MS
+        local msg_delay = play_eject_animation(weapon)
+        schedule_status(msg_delay)
+    end
+    return true
+end
+
+function actor_on_weapon_reload(actor, weapon, ammo_total)
+    if not auto_eject then return end
+    local wpn = db.actor and db.actor:active_item()
+    if not (wpn and IsWeapon(wpn)) then return end
+    auto_started_at = time_global()
+    auto_saw_reload = false
+    auto_wpn_id = wpn:id()
+    RemoveTimeEvent("ac_eject", "auto")
+    CreateTimeEvent("ac_eject", "auto", 0.25, auto_eject_check)
+end
+
+-- Catch-all trigger: every mag-load path, whatever initiated it, drives the weapon through
+-- switch_state(7) and ends a reload-state HUD animation
+function actor_on_hud_animation_end(item, section, motion, state, slot)
+    if not auto_eject then return end
+    if not (state == 7 or (motion and string.find(motion, "reload"))) then return end
+    local wpn = db.actor and db.actor:active_item()
+    if not (wpn and IsWeapon(wpn) and item and item:id() == wpn:id()) then return end
+    print_dbg("auto eject: reload animation ended on %s, arming mismatch check", section or "?")
+    auto_started_at = time_global()
+    auto_saw_reload = true  -- the reload just visibly happened
+    auto_wpn_id = wpn:id()
+    RemoveTimeEvent("ac_eject", "auto")
+    CreateTimeEvent("ac_eject", "auto", 0.1, auto_eject_check)
+end
+
+-- ### Input
+
+function on_key_press(key)
+    if not enabled then return end
+    if not mcm_key or mcm_key == DIK_keys.DIK_ESCAPE then return end  -- unbound
+    if key ~= mcm_key then return end
+    -- the eject key may not share the Reload bind: every reload would also eject a round
+    if dik_to_bind(key) == key_bindings.kWPN_RELOAD then return end
+    if not (mcm_modifier == 0 or ui_mcm.get_mod_key(mcm_modifier)) then return end
+    eject_one_round()
+end
+
+-- ADS during the eject animation cancels the HUD motion engine-side; cancel our scheduled
+-- anm_close, status message and detector restore with it so nothing fires into the aim
+function ac_eject_ads_interrupt()
+    -- only while an eject is actually playing
+    if time_global() >= eject_cooldown_until then return end
+
+    -- aiming only overrides the weapon pose
+    if game.stop_hud_motion then game.stop_hud_motion() end
+    if ammo_check_mcm and ammo_check_mcm.ac_clear_anim_cam_effectors then
+        ammo_check_mcm.ac_clear_anim_cam_effectors()
+    end
+    RemoveTimeEvent("ac_eject", "close")
+    RemoveTimeEvent("ac_eject", "status")
+    RemoveTimeEvent("ac_eject", "rack_snd")
+    RemoveTimeEvent("ac_eject", "restore_det")
+    restore_detector()
+end
+
+function on_game_start()
+    RegisterScriptCallback("actor_on_first_update", actor_on_first_update)
+    RegisterScriptCallback("on_option_change", on_option_change)
+    RegisterScriptCallback("on_key_press", on_key_press)
+    RegisterScriptCallback("actor_on_weapon_reload", actor_on_weapon_reload)
+    RegisterScriptCallback("actor_on_hud_animation_end", actor_on_hud_animation_end)
+    RegisterScriptCallback("actor_on_weapon_zoom_in", ac_eject_ads_interrupt)
+end

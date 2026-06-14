@@ -64,6 +64,9 @@
     <string id="st_ac_grenade">
         <text>Grenade loaded</text>
     </string>
+    <string id="st_ac_no_grenade">
+        <text>No grenade</text>
+    </string>
     <string id="st_ac_loaded">
         <text>Loaded</text>
     </string>
@@ -364,9 +367,6 @@
     <string id="rax_ammo_check_animation_grenade_anim_mode_lst_gren_hide_show">
         <text>Hide/Show</text>
     </string>
-    <string id="rax_ammo_check_animation_grenade_anim_mode_lst_gren_fake_reload">
-        <text>Fake Reload (grenade-load anim)</text>
-    </string>
     <string id="rax_ammo_check_animation_grenade_anim_mode_lst_gren_message">
         <text>Message Only</text>
     </string>
@@ -465,6 +465,12 @@
     </string>
     <string id="ui_mcm_rax_ammo_check_animation_block_reload_during_check_desc">
         <text>Prevent the reload key from interrupting the ammo check animation while it plays. Turn OFF to allow cancelling the check by reloading.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hud_behavior_dof_on_check">
+        <text>Depth of Field During Check</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hud_behavior_dof_on_check_desc">
+        <text>Blur the background and focus the weapon while a check animation plays, then ease back when it ends. Uses the Screen Space Shaders weapon depth-of-field and its configured blur amount; does nothing if Screen Space Shaders is not installed.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_keybind_reload_warn">
         <text>Ammo Check key cannot be the Reload key - cleared. Use One-Key Weapon Controls for reload-triggered checks.</text>
@@ -590,7 +596,7 @@
         <text>Action Key</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_onekey_key_reload_desc">
-        <text>The key that drives all One Key actions. Must NOT be the same key as your vanilla Reload control, or the engine will also reload on every press. Recommended setup: rebind vanilla Reload to a free key, then set this to your old Reload key (R).</text>
+        <text>The key that drives all One Key actions. It may be the same key as your vanilla Reload control (R by default): One Key then takes that key over automatically and performs the reload itself, so nothing double-fires. Any other key works too and leaves your vanilla Reload control untouched.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_onekey_reload_key_unjams">
         <text>Tap Unjams a Jammed Weapon</text>
@@ -697,6 +703,12 @@
     <string id="ui_mcm_rax_ammo_check_onekey_doubletap_ms_desc">
         <text>Time window for a second tap to count as a double-tap. Also how long a single tap-reload waits before firing, so a quick second tap can convert it to the ammo-type switch. Lower makes reload snappier but shrinks the double-tap window. Default 200.</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_busy_instant_tap">
+        <text>Instant Action While Animating (Legacy)</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_busy_instant_tap_desc">
+        <text>Replicates the original OneKey Weapon Controls behavior: while the weapon is mid-animation (aiming in or out, firing, drawing), pressing the key fires the Tap action immediately at key-down instead of waiting to tell a tap from a hold or double-tap. Snappiest possible reload during animations, but Hold and Double-Tap are unavailable until the weapon settles. Off keeps tap, double-tap and hold working the same in any weapon state.</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_onekey_update_mcm">
         <text>Update MCM to 1.6.0 or newer to rebind the action key here. Key defaults to R.</text>
     </string>
@@ -706,7 +718,7 @@
         <text>Fire Mode Controls</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_desc">
-        <text>One key to cycle the weapon fire mode and show the new mode on screen. Modifier + key cycles backwards. Hold the key to show the current mode. Uses its own key (default X), separate from reload.</text>
+        <text>One key for fire-mode control. Tap, double-tap and hold are each configurable from the same actions: Switch (next mode, modifier reverses to previous), Check (show the current mode), Inspect (look the weapon over), or None. Defaults: tap switches, hold shows the mode. Uses its own key (default X), separate from reload.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_enable">
         <text>Enable Fire Mode Key</text>
@@ -786,11 +798,89 @@
     <string id="ui_mcm_rax_ammo_check_firemode_show_letter_desc">
         <text>Append the mode letter to the message: [S] single, [B] burst, [A] auto. Works in the text, none and dots styles. With the None style it is the only thing shown.</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_firemode_inspect_on_hold">
-        <text>Inspect Weapon on Hold</text>
+    <string id="ui_mcm_rax_ammo_check_firemode_tap_action">
+        <text>Tap Action</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_firemode_inspect_on_hold_desc">
-        <text>Hold the fire-mode key to play a weapon inspection animation instead of showing the current fire mode. Tapping the key still cycles the fire mode. Falls back to showing the mode if the weapon has no inspect animation.</text>
+    <string id="ui_mcm_rax_ammo_check_firemode_tap_action_desc">
+        <text>What a single tap does. Switch: cycle to the next fire mode (hold the Previous Mode Modifier to go backwards). Set Single: jump straight to single fire. Set Auto (or Burst): jump to full-auto, or burst if the weapon has no auto, otherwise leave it. Check: show the current fire mode on screen. Inspect: play a weapon look-over animation. None: nothing.</text>
+    </string>
+    <string id="rax_ammo_check_firemode_tap_action_lst_fa_none">
+        <text>None (Disabled)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_tap_action_lst_fa_switch">
+        <text>Switch Fire Mode (next/prev)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_tap_action_lst_fa_single">
+        <text>Set Single</text>
+    </string>
+    <string id="rax_ammo_check_firemode_tap_action_lst_fa_auto">
+        <text>Set Auto (or Burst)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_tap_action_lst_fa_check">
+        <text>Fire Mode Check</text>
+    </string>
+    <string id="rax_ammo_check_firemode_tap_action_lst_fa_inspect">
+        <text>Inspect Weapon</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_doubletap_action">
+        <text>Double-Tap Action</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_doubletap_action_desc">
+        <text>What a double-tap does. Switch: cycle to the next fire mode (modifier reverses). Set Single: jump to single fire. Set Auto (or Burst): jump to full-auto, or burst if no auto, otherwise leave it. Check: show the current fire mode. Inspect: play a weapon look-over animation. None: double-tap does nothing, so the tap action fires immediately with no wait.</text>
+    </string>
+    <string id="rax_ammo_check_firemode_doubletap_action_lst_fa_none">
+        <text>None (Disabled)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_doubletap_action_lst_fa_switch">
+        <text>Switch Fire Mode (next/prev)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_doubletap_action_lst_fa_single">
+        <text>Set Single</text>
+    </string>
+    <string id="rax_ammo_check_firemode_doubletap_action_lst_fa_auto">
+        <text>Set Auto (or Burst)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_doubletap_action_lst_fa_check">
+        <text>Fire Mode Check</text>
+    </string>
+    <string id="rax_ammo_check_firemode_doubletap_action_lst_fa_inspect">
+        <text>Inspect Weapon</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_hold_action">
+        <text>Hold Action</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_hold_action_desc">
+        <text>What holding the key does. Check: show the current fire mode. Switch: cycle to the next fire mode (modifier reverses). Set Single: jump to single fire. Set Auto (or Burst): jump to full-auto, or burst if no auto, otherwise leave it. Inspect: play a weapon look-over animation. None: holding does nothing, the press runs the tap action on release.</text>
+    </string>
+    <string id="rax_ammo_check_firemode_hold_action_lst_fa_none">
+        <text>None (Disabled)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_hold_action_lst_fa_switch">
+        <text>Switch Fire Mode (next/prev)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_hold_action_lst_fa_single">
+        <text>Set Single</text>
+    </string>
+    <string id="rax_ammo_check_firemode_hold_action_lst_fa_auto">
+        <text>Set Auto (or Burst)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_hold_action_lst_fa_check">
+        <text>Fire Mode Check</text>
+    </string>
+    <string id="rax_ammo_check_firemode_hold_action_lst_fa_inspect">
+        <text>Inspect Weapon</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_hold_ms">
+        <text>Hold Time (ms)</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_hold_ms_desc">
+        <text>How long to hold the key before the Hold Action fires instead of the tap action. Lower feels snappier; too low may trigger on a slightly long tap. Default 200.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_doubletap_ms">
+        <text>Double-Tap Window (ms)</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_doubletap_ms_desc">
+        <text>Time window for a second tap to count as a double-tap. Also how long a single tap waits before firing, so a quick second tap can convert it to the Double-Tap Action. Lower makes the tap snappier but shrinks the double-tap window. Default 200.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_ron_opacity">
         <text>Custom Texture Opacity</text>
@@ -844,5 +934,81 @@
     </string>
     <string id="ui_mcm_rax_ammo_check_keybind_mode_desc">
         <text>How the Ammo Check key activates: Press (single tap), Double-Tap, or Hold.</text>
+    </string>
+
+    <!-- Eject Chambered Round -->
+    <string id="ui_mm_title_rax_ammo_check_eject">
+        <text>Eject Chambered Round</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_desc">
+        <text>One key ejects the round currently in the chamber back into your inventory and chambers the next round from the magazine. Useful after switching magazines with 1 in chamber: eject the old round so the next shot comes from the new mag. Bolt-action and pump weapons play their bolt cycle animation.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_mags_note">
+        <text>Magazine-fed weapons need Anomaly Magazines Redux with its "1 in chamber" option enabled. Weapons outside the magazine system (internal-mag bolt rifles like the Mosin) always eject directly.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_enable">
+        <text>Enable</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_enable_desc">
+        <text>Master toggle for the Eject Chambered Round feature.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_key">
+        <text>Eject Round Key</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_key_desc">
+        <text>Key that ejects the chambered round. Unbound by default. Do not put it on the Reload key.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_modifier">
+        <text>Modifier</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_modifier_desc">
+        <text>Optional modifier to hold together with the Eject Round key. None means the key works on its own.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_camera_anim">
+        <text>Camera Motion on Other Weapons</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_camera_anim_desc">
+        <text>Weapons without a bolt cycle animation play the small camera motion from Camera Reanimation Project (when installed), plus a rack sound. Off means sound only.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_auto_eject">
+        <text>Auto Eject Mismatched Round After Reload</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_auto_eject_desc">
+        <text>After a reload, if the round kept in the chamber differs from the next round in the new magazine (e.g. an old FMJ round in front of a fresh AP mag), the weapon automatically racks it out into your inventory so the next shot comes from the new mag. Tip: reloading with an empty chamber plays the full reload animation natively, so ejecting the round with the key before reloading gives the same result by hand.</text>
+    </string>
+
+    <!-- ### Floating Mag HUD -->
+    <string id="ui_mm_title_rax_ammo_check_maghud">
+        <text>Floating Mag HUD</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_req_note">
+        <text>Requires the "Immersive Ammo Check" mod installed. (Exception: "Use AmmoCheck Text and Colors" renders on its own and works without it.)</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_desc">
+        <text>Sticks a small ammo readout to the weapon's magazine on screen during a mag-check animation, so you read the count off the gun instead of a corner message. Covers proper inspect and fake-reload weapons. With "Use AmmoCheck Text and Colors" OFF it drives the "Immersive Ammo Check" mod's own numeric readout + bar (that mod must be installed). With it ON it renders this mod's own styled text at the magazine and needs no other mod.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_enable">
+        <text>Enable Floating Mag HUD</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_enable_desc">
+        <text>Master switch for the floating magazine HUD. OFF by default. The default mode needs the "Immersive Ammo Check" mod; turn on "Use AmmoCheck Text and Colors" to run without it.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_use_our_text">
+        <text>Use AmmoCheck Text and Colors</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_use_our_text_desc">
+        <text>When ON, the floating HUD renders this mod's full status text at the magazine using the custom text renderer: your Display Mode, colors, ammo type/tag, all highlight modes (including two-tone and the mismatch line) and the chosen font/size/shadow. Works with or without the Immersive Ammo Check mod. When OFF, the other mod's own numeric readout + bar is shown (that mod required).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_show_bar">
+        <text>Show Progress Bar (with AmmoCheck Text)</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_show_bar_desc">
+        <text>When ON, also draw the Immersive Ammo Check mod's progress bar at the magazine alongside this mod's text. Only applies when "Use AmmoCheck Text and Colors" is ON (in the other mode the bar is already shown). Requires the Immersive Ammo Check mod installed.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_bone_debug">
+        <text>Bone Tracking Debug Log</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_bone_debug_desc">
+        <text>Log the magazine bone the floating HUD anchors to, and its screen position, to the game log (xray_*.log) each check. Use it to find why the readout does not stick on a given weapon: lines tagged [AC-BONE] show the bone name found (or NO_BONE when the weapon has no recognized mag/round bone). Only applies to the "Use AmmoCheck Text and Colors" overlay. Leave OFF for normal play.</text>
     </string>
 </string_table>

@@ -78,6 +78,7 @@ local AC_ANIM_BLOCK_MS = 5000
 block_reload_during_check = true  -- MCM: prevent the reload key from interrupting the check animation  [non-local: upvalue budget]
 local ac_mags_suppressed = false  -- true while we have unregistered the Mags Redux reload handler for the block window
 local onekey_enabled = false      -- cached: One-Key owns/suppresses the Reload bind itself, so we must not also touch the Mags handler
+local onekey_captures_reload_bind = false  -- cached: One-Key only suppresses the Mags handler when it owns the vanilla Reload bind
 local onekey_key = nil            -- cached DIK of One-Key's reload-multiplex key, so the standalone check can yield only on a real collision
 local use_clr = true
 local color_ammo_type = true  -- when false, ammo type/tag stay white even with Colored Messages on
@@ -262,6 +263,7 @@ local MIN_BAR = {
     st_ac_just_one       = MIN_FILL,           -- # (single round, 2-round weapons)
     st_ac_jammed         = "X",
     st_ac_grenade        = "o",
+    st_ac_no_grenade     = "X",
     st_ac_noMag          = "X" .. string.rep("_", 6),  -- X______
     st_ac_empty_mag_oitc = "+",                -- empty mag, 1 chambered
     st_ac_no_mag_oitc    = "X+",               -- no mag, 1 chambered
@@ -435,8 +437,16 @@ local function set_ac_mags_suppressed(suppress)
         UnregisterScriptCallback("on_before_key_press", magazines.on_key_press)
         ac_mags_suppressed = true
     elseif (not suppress) and ac_mags_suppressed then
-        RegisterScriptCallback("on_before_key_press", magazines.on_key_press)
         ac_mags_suppressed = false
+        -- One-Key keeps the Mags handler unregistered for as long as it owns the Reload bind.
+        -- Re-registering it here would hand the reload key back to Mags behind One-Key's back,
+        -- and the next press would fire a Mags reload on top of the One-Key action
+        -- Leave it to One-Key in that case.
+        if ammo_check_onekey_mcm and ammo_check_onekey_mcm.keeps_mags_suppressed
+           and ammo_check_onekey_mcm.keeps_mags_suppressed() then
+            return
+        end
+        RegisterScriptCallback("on_before_key_press", magazines.on_key_press)
     end
 end
 
@@ -446,6 +456,14 @@ local function ac_end_reload_block()
     RemoveTimeEvent("ac_mags_block", "arm")
     RemoveTimeEvent("ac_mags_block", "restore")
     set_ac_mags_suppressed(false)
+end
+
+-- Public: true while the reload-block window is armed AND a check animation is actually playing
+function ac_reload_blocked()
+    if time_global() >= ac_anim_block_until then return false end
+    local wpn = db.actor and db.actor:active_item()
+    return (ac_pending_inspect_anim_playing or is_fake_reload
+        or (wpn and IsWeapon(wpn) and wpn:get_state() ~= 0)) and true or false
 end
 
 -- True when One-Key is on AND the pressed key is the very key One-Key drives its tap/hold multiplex
@@ -466,8 +484,15 @@ function on_before_key_press(key, bind, dis, flags)
     -- the only way the fallback actually shows. Yields only when the key collides with One-Key's key.
     if not onekey_owns_key(key) and mcm_key and mcm_key ~= DIK_keys.DIK_ESCAPE and key == mcm_key then
         local wpn = db.actor and db.actor:active_item()
-        if wpn and IsWeapon(wpn) and ac_should_block_inspect_no_mag(wpn, wpn:section()) then
-            flags.ret_value = false
+        if wpn and IsWeapon(wpn) then
+            -- No-magazine path-A guard (see above)
+            if ac_should_block_inspect_no_mag(wpn, wpn:section()) then
+                flags.ret_value = false
+
+            -- UBGL / grenade-launcher guard
+            elseif wpn:weapon_in_grenade_mode() then
+                flags.ret_value = false
+            end
         end
     end
 
@@ -655,6 +680,10 @@ local AC_CURSOR_VPAD = 24
 -- pos_override (optional): a render-position index that wins over the configured render_position,
 -- so a sibling feature can pin its message somewhere (e.g. fire mode forcing screen bottom)
 local function ac_render_layout(pos_override)
+    -- explicit screen anchor (floating mag HUD): a {x,y} table centers the line on that point
+    if type(pos_override) == "table" then
+        return 2, (pos_override.x or 512) - AC_RENDER_W / 2, pos_override.y or 600
+    end
     local p = pos_override or render_position or 3
     local gap = render_cursor_gap or 80
     local cx_left = (1024 - AC_RENDER_W) / 2  -- x for a centered full-width line
@@ -916,23 +945,56 @@ local function reset_ac_overlay()
     end
 end
 
+-- Second overlay instance dedicated to the floating mag HUD, so it can show at the magazine while
+-- the corner-message overlay (above) is free to show its own line (when suppression is off)
+local ac_maghud_overlay = nil
+local function get_maghud_overlay()
+    if not ac_maghud_overlay then
+        ac_maghud_overlay = ac_msg_overlay()
+    end
+    return ac_maghud_overlay
+end
+local function reset_maghud_overlay()
+    if ac_maghud_overlay then
+        ac_maghud_overlay:hide()
+        ac_maghud_overlay = nil
+    end
+end
+
 -- ammo type classification
 -- returns: type_key, display_tag
+-- Exact-section overrides, matched by PREFIX (so _bad/_verybad degraded variants inherit),
+-- checked before the generic patterns. Needed where a section name lies about the round:
+-- the 9x19 "pbp" is the JHP +P hollow point (weapon_ammo.ltx comment "JHP +P"), unlike the
+-- 9x18 PBP which is a real armor-piercing round, so the generic "_pbp" rule mislabels it.
+-- lang independent fix
+local AMMO_TYPE_OVERRIDES = {
+    { prefix = "ammo_9x19_pbp", type = "hp", tag = "(HP)" },
+}
+
 local function classify_ammo_type(section)
     if not section then return "unknown", nil end
-    
+
     -- check cache first
     local cached = ammo_type_cache[section]
     if cached then
         return cached.type, cached.tag
     end
-    
+
     local sec_lower = string_lower(section)
     local result_type = "unknown"
     local result_tag = nil
-    
+
+    for i = 1, #AMMO_TYPE_OVERRIDES do
+        local ov = AMMO_TYPE_OVERRIDES[i]
+        if string_find(sec_lower, ov.prefix, 1, true) == 1 then
+            ammo_type_cache[section] = { type = ov.type, tag = ov.tag }
+            return ov.type, ov.tag
+        end
+    end
+
     -- AP (Armor Piercing): ap, pp, pbp, bp, 7h14, 7n, sp10, ss190, dart, barrikada
-    if string_find(sec_lower, "_ap") 
+    if string_find(sec_lower, "_ap")
        or string_find(sec_lower, "_bp") 
        or string_find(sec_lower, "_pbp")
        or string_find(sec_lower, "_pp")
@@ -1383,8 +1445,8 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
         clr = use_clr and clr00_Red or clr06_White
 
     elseif in_grenade_mode then
-        message = currentAmmo == 1 and get_translation("st_ac_grenade") or get_translation("st_ac_empty")
-        msg_key = currentAmmo == 1 and "st_ac_grenade" or "st_ac_empty"
+        message = currentAmmo == 1 and get_translation("st_ac_grenade") or get_translation("st_ac_no_grenade")
+        msg_key = currentAmmo == 1 and "st_ac_grenade" or "st_ac_no_grenade"
         clr = use_clr and (currentAmmo == 1 and clr06_White or clr00_Red) or clr06_White
 
     elseif currentAmmo == 0 then
@@ -1659,6 +1721,13 @@ end
 -- display ammo status with optional second line
 local function display_ammo_status(message, clr, ammo_type, separate_tag, segments)
     if not show_message then return end
+    -- Floating Mag HUD takes over the readout for this check: when it is enabled, set to replace the
+    -- corner message, and a mag-visible check animation is in flight, skip the screen message so the
+    -- two do not stack
+    if ammo_check_maghud_mcm and ammo_check_maghud_mcm.suppresses_message
+       and ammo_check_maghud_mcm.suppresses_message() and is_check_animating() then
+        return
+    end
     -- hide_msg_on_inspect: suppress message only when path A is letting the native inspect anim play.
     -- All other paths (fake reload, lower, hide/show, auto-check after reload) keep the flag false,
     -- so they still show the message.
@@ -1706,6 +1775,44 @@ local function display_ammo_status(message, clr, ammo_type, separate_tag, segmen
     -- (using the weapon the check was about, not the actor's currently active weapon),
     -- so they are not overwritten here
     ac_message_until = time_global() + math_floor(msg_duration * 1000)
+end
+
+function is_check_animating()
+    return (ac_pending_inspect_anim_playing or is_fake_reload or do_ammo_check_anim) and true or false
+end
+
+function render_maghud_overlay(weapon, x, y)
+    if not (weapon and IsWeapon(weapon)) then return end
+    local weaponId = weapon:id()
+    local sec = weapon:section()
+    local in_grenade_mode = weapon:weapon_in_grenade_mode()
+    local currentAmmo = weapon:get_ammo_in_magazine() or 0
+
+    local message, clr, ammo_type, separate_tag, segments =
+        get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
+    if not message then return end
+
+    local ov = get_maghud_overlay()
+    local pos = { x = x, y = y }
+    local dur = msg_duration or 2
+
+    if segments then
+        ov:show_segments(segments, dur, pos)
+        return
+    end
+
+    local tag_clr = (use_clr and color_ammo_type and get_ammo_type_color(ammo_type)) or clr06_White
+    local base_clr = clr or clr06_White
+    if highlight_ammo_mode == 3 and separate_tag and separate_tag ~= "" then
+        ov:show_combined(message, base_clr, separate_tag, tag_clr, dur, pos)
+    else
+        local line2 = (highlight_ammo_mode == 2) and separate_tag or nil
+        ov:show(message, base_clr, line2, tag_clr, dur, pos)
+    end
+end
+
+function hide_maghud_overlay()
+    if ac_maghud_overlay then ac_maghud_overlay:hide() end
 end
 
 -- Public single-line display used by sibling features (e.g. One-Key Fire Mode). Routes through the
@@ -1880,11 +1987,15 @@ local function mag_check_animation(anm_table, obj)
         local nm = anm_table and anm_table.anm_name and tostring(anm_table.anm_name)
         if nm and string.find(nm, "^anm_ammo_check") then
             -- Replace the engine's auto mag-check bore with the idle animation, so no inspect plays.
-            -- anm_idle loops and would leave the weapon stuck in state 4 (eBore) - the fallback branch
-            -- schedules a forced switch_state(0) to pull it back to idle so further checks aren't
-            -- blocked. The weapon just stays put (no inspect, no shake of the mag-check).
-            anm_table.anm_name = "anm_idle"
-            print_dbg("No-mag fallback: suppressed engine inspect %s -> anm_idle", nm)
+            -- The idle loops and would leave the weapon stuck in state 4 (eBore) - the caller schedules
+            -- a forced switch_state(0) to pull it back.
+            -- In grenade/UBGL mode use the grenade idle so the pose does not jump to the rifle idle
+            local idle = "anm_idle"
+            if obj:weapon_in_grenade_mode() and has_animation(obj:section(), "anm_idle_g") then
+                idle = "anm_idle_g"
+            end
+            anm_table.anm_name = idle
+            print_dbg("Suppressed engine inspect %s -> %s", nm, idle)
         end
         return
     end
@@ -1943,6 +2054,78 @@ local function mag_check_animation(anm_table, obj)
 end
 
 -- game initialization
+
+-- ok so .. lots of words here, but it's important (kind of)
+-- The engine auto-starts a camera effector for every HUD motion that has a matching
+-- camera_effects\weapon\<motion_name>.anm.
+-- It is independent of the HUD motion, so stopping the motion leaves the camera swaying to the end of its track.
+-- id of that hud motion is unknown; so we use a "classic" 4999 iteration workaround.
+-- Side effect: also clears any other in-flight per-anim camera effect
+-- No cleaner handle existed before.
+-- But now since Modded Exes 2026.6.12 `level.remove_hud_motion_cam_effectors()` was added.
+--
+-- However we still should provide a backwards compatible fallback.
+-- Known mods that park FIXED effector ids inside the engine's random range are excluded so
+-- the sweep cannot clip their one-shot effects (ids verified against the GAMMA 0.9.5).
+local AC_CAM_SWEEP_EXCLUDE = {
+    [5923] = true,                                  -- exo_powers
+    [7538] = true, [7539] = true, [8053] = true,    -- actor_effects (base game)
+    [8063] = true,                                  -- quickdraw
+    [7800] = true, [7801] = true, [7802] = true,    -- Camera reanimation fixes:
+    [7803] = true, [7804] = true, [7805] = true,    -- crouch / stand / lean
+    [8558] = true, [8559] = true,                   -- enhanced_animations (FDDA)
+    [8560] = true,                                  -- take_item_anim
+    [8800] = true,                                  -- wounded_heal_anim (Dot Marks)
+    [9209] = true,                                  -- grok_artefacts_melter_charge
+    [9342] = true,                                  -- bas_laser_control
+    [9665] = true,                                  -- matches_anim
+    [9921] = true,                                  -- player_injuries
+}
+function ac_clear_anim_cam_effectors()
+
+    -- if Modded Exes 2026.6.12+
+    if level.remove_hud_motion_cam_effectors then
+        level.remove_hud_motion_cam_effectors()
+        -- printf("![AC] cam effector cleanup via engine remove_hud_motion_cam_effectors")
+        return
+    end
+
+    -- else fallback
+    -- printf("![AC] cam effector cleanup via fallback id sweep 5000-9999")
+    for i = 5000, 9999 do
+        if not AC_CAM_SWEEP_EXCLUDE[i] then
+            level.remove_cam_effector(i)
+        end
+    end
+end
+
+-- ADS interrupt
+function ac_on_ads_interrupt()
+    if not (is_fake_reload or do_ammo_check_anim or ac_pending_inspect_anim_playing) then return end
+    print_dbg("Ammo check interrupted by ADS - cancelling pending message/events.")
+    if game.stop_hud_motion then game.stop_hud_motion() end
+    ac_clear_anim_cam_effectors()
+    RemoveTimeEvent("ammo_check", "message_delay")
+    RemoveTimeEvent("ammo_check", "defer_to_idle")
+    RemoveTimeEvent("ammo_check", "restore_det")
+    if ac_last_weapon_id and ac_last_weapon_id ~= 0 then
+        RemoveTimeEvent("AmmoCheck_BoltCycle", "close" .. ac_last_weapon_id)
+    end
+    is_fake_reload = false
+    do_ammo_check_anim = nil
+    wpn_checking = nil
+    pending_reload_check = false
+    ac_pending_inspect_anim_playing = false
+    ac_inspect_pending = false
+    if det_active then
+        if db.actor then db.actor:show_detector(true) end
+        det_active = nil
+    end
+    ac_cooldown_until = 0
+    ac_last_weapon_id = 0
+    ac_end_reload_block()
+end
+
 function on_game_start()
     -- setup MagsRedux integration (needs BOTH modules: some setups provide one without the other)
     if magazine_binder and magazines then
@@ -1970,6 +2153,7 @@ function on_game_start()
     RegisterScriptCallback("on_before_key_press", on_before_key_press)
     RegisterScriptCallback("actor_on_hud_animation_end", actor_on_hud_animation_end)
     RegisterScriptCallback("actor_on_weapon_jammed", actor_on_weapon_jammed)
+    RegisterScriptCallback("actor_on_weapon_zoom_in", ac_on_ads_interrupt)
 
     -- register animation mutator for fake reload mode
     if animation_common and animation_common.add_anim_mutator then
@@ -2185,6 +2369,17 @@ function on_mcm_load()
                 { id = "msg_duration", type = "track", val = 2, min = 1, max = 5, step = 0.5, def = 2 },
             }},
 
+            -- ### Floating Mag HUD (comp code lives in ammo_check_maghud_mcm.script
+            { id = "maghud", sh = true, text = "ui_mm_title_rax_ammo_check_maghud", gr = {
+                { id = "slide_maghud", type = "slide", link = "ui_options_slider_player", text = "ui_mm_title_rax_ammo_check_maghud", size = { 512, 50 }, spacing = 20 },
+                { id = "req_note", type = "desc", text = "ui_mcm_rax_ammo_check_maghud_req_note", clr = { 255, 175, 0, 0 } },
+                { id = "info_desc", type = "desc", text = "ui_mcm_rax_ammo_check_maghud_desc" },
+                { id = "enable", type = "check", val = 1, def = false },
+                { id = "use_our_text", type = "check", val = 1, def = false },
+                { id = "show_bar", type = "check", val = 1, def = false },
+                { id = "bone_debug", type = "check", val = 1, def = false },
+            }},
+
             -- ### HUD / Behavior
             { id = "hud_behavior", sh = true, text = "ui_mcm_rax_ammo_check_title_hud_behavior", gr = {
                 { id = "slide_hud_behavior", type = "slide", link = "ui_options_slider_player", text = "ui_mcm_rax_ammo_check_title_hud_behavior", size = { 512, 50 }, spacing = 20 },
@@ -2193,6 +2388,7 @@ function on_mcm_load()
                 { id = "hide_hud", type = "check", val = 1, def = false },
                 { id = "check_grenade_mode", type = "check", val = 1, def = false },
                 { id = "auto_check_reload", type = "check", val = 1, def = false },
+                { id = "dof_on_check", type = "check", val = 1, def = false },
             }},
 
             -- ### Animation
@@ -2203,7 +2399,7 @@ function on_mcm_load()
                     content = { { 0, "anim_mode_default" }, { 1, "anim_mode_lower" }, { 2, "anim_mode_fake_reload" } }
                 },
                 { id = "grenade_anim_mode", type = "list", val = 2, def = 0,
-                    content = { { 0, "gren_lower" }, { 1, "gren_hide_show" }, { 2, "gren_fake_reload" }, { 3, "gren_message" } }
+                    content = { { 0, "gren_lower" }, { 1, "gren_hide_show" }, { 3, "gren_message" } }
                 },
                 { id = "no_magazine_fallback", type = "list", val = 2, def = 1,
                     content = { { 0, "fallback_hide_show" }, { 1, "fallback_lower" }, { 2, "fallback_none" } }
@@ -2256,14 +2452,24 @@ function on_mcm_load()
                 { id = "texture", type = "list", val = 0, def = "ron_text",
                     content = { { "ron_text", "tx_ron_text" }, { "ron_notext", "tx_ron_notext" }, { "bwais", "tx_bwais" } }
                 },
+                { id = "ron_opacity", type = "track", val = 2, min = 0, max = 255, step = 5, def = 255 },
+                { id = "ron_hue", type = "track", val = 2, min = 0, max = 360, step = 1, def = 0 },
+                { id = "ron_y_offset", type = "track", val = 2, min = -400, max = 400, step = 5, def = 0 },
                 { id = "position", type = "list", val = 0, def = "default",
                     content = { { "default", "pos_default" }, { "screen_bottom", "pos_bottom" } }
                 },
                 { id = "show_letter", type = "check", val = 1, def = false },
-                { id = "inspect_on_hold", type = "check", val = 1, def = false },
-                { id = "ron_opacity", type = "track", val = 2, min = 0, max = 255, step = 5, def = 255 },
-                { id = "ron_hue", type = "track", val = 2, min = 0, max = 360, step = 1, def = 0 },
-                { id = "ron_y_offset", type = "track", val = 2, min = -400, max = 400, step = 5, def = 0 },
+                { id = "tap_action", type = "list", val = 0, def = "switch",
+                    content = { { "none", "fa_none" }, { "switch", "fa_switch" }, { "set_single", "fa_single" }, { "set_auto", "fa_auto" }, { "check", "fa_check" }, { "inspect", "fa_inspect" } }
+                },
+                { id = "doubletap_action", type = "list", val = 0, def = "none",
+                    content = { { "none", "fa_none" }, { "switch", "fa_switch" }, { "set_single", "fa_single" }, { "set_auto", "fa_auto" }, { "check", "fa_check" }, { "inspect", "fa_inspect" } }
+                },
+                { id = "hold_action", type = "list", val = 0, def = "check",
+                    content = { { "none", "fa_none" }, { "switch", "fa_switch" }, { "set_single", "fa_single" }, { "set_auto", "fa_auto" }, { "check", "fa_check" }, { "inspect", "fa_inspect" } }
+                },
+                { id = "hold_ms", type = "track", val = 2, min = 100, max = 600, step = 25, def = 200 },
+                { id = "doubletap_ms", type = "track", val = 2, min = 50, max = 500, step = 25, def = 200 },
                 { id = "desc_update_mcm", type = "desc", text = "ui_mcm_rax_ammo_check_onekey_update_mcm", clr = { 255, 175, 0, 0 },
                     precondition = { function() return not mcm_keybinds end }
                 },
@@ -2291,6 +2497,7 @@ function on_mcm_load()
                 },
                 { id = "hold_ms", type = "track", val = 2, min = 100, max = 600, step = 25, def = 200 },
                 { id = "doubletap_ms", type = "track", val = 2, min = 50, max = 500, step = 25, def = 200 },
+                { id = "busy_instant_tap", type = "check", val = 1, def = false },
                 { id = "desc_update_mcm", type = "desc", text = "ui_mcm_rax_ammo_check_onekey_update_mcm", clr = { 255, 175, 0, 0 },
                     precondition = { function() return not mcm_keybinds end }
                 },
@@ -2314,6 +2521,20 @@ function on_mcm_load()
                 { id = "throw_force", type = "track", val = 2, min = 0, max = 100, step = 5, def = 40 },
                 { id = "slowdown_enable", type = "check", val = 1, def = false },
                 { id = "slowdown_pct", type = "track", val = 2, min = 0, max = 25, step = 1, def = 10 },
+            }},
+
+            -- ### Eject Round (logic lives in ammo_check_eject_mcm.script)
+            { id = "eject", sh = true, text = "ui_mm_title_rax_ammo_check_eject", gr = {
+                { id = "slide_eject", type = "slide", link = "ui_options_slider_player", text = "ui_mm_title_rax_ammo_check_eject", size = { 512, 50 }, spacing = 20 },
+                { id = "info_desc", type = "desc", text = "ui_mcm_rax_ammo_check_eject_desc" },
+                { id = "mags_note", type = "desc", text = "ui_mcm_rax_ammo_check_eject_mags_note", clr = { 255, 175, 0, 0 } },
+                { id = "enable", type = "check", val = 1, def = false },
+                { id = "key", type = "key_bind", val = 2, def = DIK_keys.DIK_ESCAPE },
+                { id = "modifier", type = ui_mcm.kb_mod_radio, val = 2, def = 0,
+                    content = { { 0, "mcm_kb_mod_none" }, { 1, "mcm_kb_mod_shift" }, { 2, "mcm_kb_mod_ctrl" }, { 3, "mcm_kb_mod_alt" } }
+                },
+                { id = "camera_anim", type = "check", val = 1, def = true },
+                { id = "auto_eject", type = "check", val = 1, def = false },
             }},
 
             -- ### Debug
@@ -2358,6 +2579,7 @@ function on_option_change()
         render_position = ui_mcm.get("rax_ammo_check/display/render_position") or 3
         render_cursor_gap = ui_mcm.get("rax_ammo_check/display/render_cursor_gap") or 80
         reset_ac_overlay()  -- rebuild on next show with current font/position settings
+        reset_maghud_overlay()  -- same for the floating mag HUD overlay instance
         local show_type_val = ui_mcm.get("rax_ammo_check/display/show_ammo_type")
         show_ammo_type = (show_type_val == true or show_type_val == 1)  -- default false (matches MCM def)
         local show_tag_val = ui_mcm.get("rax_ammo_check/display/show_ammo_tag")
@@ -2411,6 +2633,10 @@ function on_option_change()
         onekey_enabled = (onekey_en == true or onekey_en == 1)
         -- One-Key's reload-multiplex key; used to yield the standalone check only on a real collision
         onekey_key = ui_mcm.get("rax_ammo_check/onekey/key_reload") or DIK_keys.DIK_R
+        -- One-Key auto-owns the vanilla Reload bind whenever its key IS the Reload-bind key (the
+        -- separate "Capture Reload Key" toggle was removed); mirror that rule here
+        onekey_captures_reload_bind = onekey_key ~= DIK_keys.DIK_ESCAPE
+            and dik_to_bind(onekey_key) == key_bindings.kWPN_RELOAD
         print_dbg("Animation settings: enable=%s, anim_mode=%s, no_mag_fb=%s, fake_fb=%s, bolt=%s, bolt_eject=%s, pump=%s, pump_eject=%s, ignore=%s", tostring(enable_animations), anim_mode, no_magazine_fallback, fake_reload_fallback, tostring(fake_reload_bolt_cycle), tostring(fake_reload_bolt_eject), tostring(fake_reload_pump_rack), tostring(fake_reload_pump_eject), tostring(fake_reload_ignore_list))
         
         -- debug settings
@@ -2654,6 +2880,15 @@ end
 -- play fake reload animation for weapons with detachable magazines
 -- uses play_hud_motion instead of switch_state(7) to avoid engine adding ammo
 local function play_reload_animation(weapon)
+    -- never fkn play the gun's fkn fake fkn reload while in a fkn UBGL fkn mode
+    if weapon:weapon_in_grenade_mode() then
+        print_dbg("Fake reload blocked: weapon in UBGL/grenade mode.")
+        is_fake_reload = false
+        do_ammo_check_anim = nil
+        wpn_checking = nil
+        return
+    end
+
     local wpn_id = weapon:id()
     local sec = weapon:section()
     local current_ammo = weapon:get_ammo_in_magazine()
@@ -2873,6 +3108,13 @@ local function should_ignore_fake_animations(sec)
     return false
 end
 
+local function get_ignore_fake_animation_override(sec)
+    if ammo_check_weapons and ammo_check_weapons.get_ignore_fake_animation_override then
+        return ammo_check_weapons.get_ignore_fake_animation_override(sec)
+    end
+    return nil
+end
+
 local function should_exclude_shell_eject(sec)
     if ammo_check_weapons and ammo_check_weapons.should_exclude_shell_eject then
         return ammo_check_weapons.should_exclude_shell_eject(sec)
@@ -2914,6 +3156,25 @@ function ac_should_block_inspect_no_mag(weapon, sec)
 end
 
 -- main ammo check function
+-- Eject one round for the bolt/pump cycle eject options
+local function eject_round_for_cycle(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
+    local ammo_section
+    if ammo_check_eject_mcm and ammo_check_eject_mcm.eject_round_data then
+        ammo_section = ammo_check_eject_mcm.eject_round_data(weapon)
+    else
+        ammo_section = get_vanilla_ammo_section(weapon)
+        if ammo_section then
+            weapon:set_ammo_elapsed(currentAmmo - 1)
+            alife_create_item(ammo_section, db.actor, { ammo = 1 })
+        end
+    end
+    if ammo_section then
+        print_dbg("Ejected round: %s (remaining: %d)", ammo_section, currentAmmo - 1)
+        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag, ac_pending_segments =
+            get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
+    end
+end
+
 function check_Ammo(skip_animation)
     local actor = db.actor
     if not actor then return end
@@ -2990,6 +3251,7 @@ function check_Ammo(skip_animation)
     RemoveTimeEvent("ammo_check", "restore_weapon")
     RemoveTimeEvent("ammo_check", "restore_det")
     RemoveTimeEvent("ammo_check", "defer_to_idle")
+    RemoveTimeEvent("ammo_check", "grenade_raise")
     RemoveTimeEvent("AmmoCheck_BoltCycle", "close"..weaponId)
     
     -- clear any lingering animation state
@@ -3039,20 +3301,29 @@ function check_Ammo(skip_animation)
     if weapon_busy then
         print_dbg("Ammo check for %s - weapon busy (state=%s), deferring until idle.", sec, tostring(currentState))
         local _start_time = time_global()
+        local _forced_idle = false
         CreateTimeEvent("ammo_check", "defer_to_idle", 0.1, function()
             local _actor = db.actor
             if not _actor then return true end
             local _w = _actor:active_item()
             if not _w or not IsWeapon(_w) then return true end
 
-            if time_global() - _start_time > 5000 then
-                print_dbg("Ammo check deferred: 5s timeout, abandoning.")
-                ac_cooldown_until = 0  -- release the guard so the user can press again
-                ac_last_weapon_id = 0
-                return true
-            end
+            local _elapsed = time_global() - _start_time
 
             if _w:get_state() ~= 0 then
+                if _elapsed > 2500 and not _forced_idle then
+                    print_dbg("Ammo check deferred: weapon still busy after 2.5s, forcing idle to un-stick.")
+                    if level.stop_hud_motion then level.stop_hud_motion() end
+                    _w:switch_state(0)
+                    _forced_idle = true
+                    return false
+                end
+                if _elapsed > 5000 then
+                    print_dbg("Ammo check deferred: 5s timeout, abandoning.")
+                    ac_cooldown_until = 0  -- release the guard so the user can press again
+                    ac_last_weapon_id = 0
+                    return true
+                end
                 return false  -- still busy, keep polling
             end
 
@@ -3075,9 +3346,10 @@ function check_Ammo(skip_animation)
         -- Also suppress the Mags Redux reload handler (ret_value alone won't stop it). Deferred one
         -- tick: the anim-playing flags / non-idle state are set by the branches BELOW, so check them
         -- next tick and only suppress when an animation actually started (a message-only check keeps
-        -- the weapon idle and must not have Mags reload blocked). Skipped when One-Key is enabled,
-        -- which already owns/suppresses the Reload bind (re-registering Mags would undo that).
-        if not onekey_enabled then
+        -- the weapon idle and must not have Mags reload blocked). Skipped only when One-Key is enabled
+        -- AND owns the Reload bind (it then already suppresses Mags; re-registering would undo that).
+        -- With One-Key on but not capturing the Reload bind, Mags stays registered, so we still suppress here.
+        if not (onekey_enabled and onekey_captures_reload_bind) then
             RemoveTimeEvent("ac_mags_block", "arm")
             RemoveTimeEvent("ac_mags_block", "restore")
             CreateTimeEvent("ac_mags_block", "arm", 0, function()
@@ -3107,21 +3379,26 @@ function check_Ammo(skip_animation)
     -- normal inspect / fake-reload path, which plays the confusing grenade-LOAD animation.
     if in_grenade_mode then
         print_dbg("Ammo check for %s - grenade mode, grenade_anim_mode=%s.", sec, grenade_anim_mode)
+
+        ac_suppress_inspect_until = time_global() + 1500
+        RemoveTimeEvent("ammo_check", "ac_unstick_bore")
+        local _gren_unstick_start = time_global()
+        CreateTimeEvent("ammo_check", "ac_unstick_bore", 0, function()
+            local w = db.actor and db.actor:active_item()
+            if not (w and IsWeapon(w)) then return true end
+            if w:get_state() == 4 then
+                w:switch_state(0)
+                return true
+            end
+            return time_global() - _gren_unstick_start > 1500
+        end)
+
         if grenade_anim_mode == 1 then
             -- hide/show weapon
             ac_pending_slot = actor:active_slot()
             actor:activate_slot(0)
             weapon_hidden = true
             CreateTimeEvent("ammo_check", "restore_weapon", 0, restore_weapon_callback)
-        elseif grenade_anim_mode == 2 then
-            -- fake reload (old behavior: plays the grenade-load animation)
-            do_ammo_check_anim = 1
-            is_fake_reload = true
-            det_active = actor:active_detector() or nil
-            if det_active then det_active:switch_state(2) end
-            play_reload_animation(weapon)
-            schedule_fake_reload_message(FAKE_RELOAD_MSG_DELAY)
-            CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
         elseif grenade_anim_mode == 3 then
             -- message only
             CreateTimeEvent("ammo_check", "message_delay", 0, delayed_display_callback)
@@ -3129,6 +3406,15 @@ function check_Ammo(skip_animation)
             -- 0: lower weapon (default)
             game.actor_lower_weapon(true)
             CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+            local lower_time = SYS_GetParam(2, sec, "weapon_lower_speed", 1.0) or 1.0
+            local raise_delay = math_max(busy_hands_delay + 0.2, lower_time * 1.7 + 0.2)
+            RemoveTimeEvent("ammo_check", "grenade_raise")
+            CreateTimeEvent("ammo_check", "grenade_raise", raise_delay, function()
+                if db.actor and game.actor_weapon_lowered() then
+                    game.actor_lower_weapon(false)
+                end
+                return true
+            end)
         end
         return
     end
@@ -3315,8 +3601,40 @@ function check_Ammo(skip_animation)
     if anim_mode == 2 then
         -- check if weapon should be ignored for fake reload animations
         if fake_reload_ignore_list and should_ignore_fake_animations(sec) then
+            -- a table entry { anim=, sound= } (or { delay= }) skips the non-immersive fake reload like a
+            -- plain true, but plays its own check animation instead of the bare hide/lower fallback
+            local ignore_override = get_ignore_fake_animation_override(sec)
+            if ignore_override then
+                if ignore_override.anim and has_animation(sec, ignore_override.anim) then
+                    print_dbg("Ammo check for %s - ignore list custom %s animation (override).", sec, ignore_override.anim)
+                    do_ammo_check_anim = 1
+                    is_fake_reload = true
+                    det_active = actor:active_detector() or nil
+                    if det_active then
+                        det_active:switch_state(2)
+                    end
+                    play_hud_animation(weapon, ignore_override.anim, ignore_override.sound)
+                    CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+                    CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
+                    return
+                elseif ignore_override.delay and has_animation(sec, "anm_open") and has_animation(sec, "anm_close") then
+                    print_dbg("Ammo check for %s - ignore list open/close with %.2fs delay (override).", sec, ignore_override.delay)
+                    do_ammo_check_anim = 1
+                    is_fake_reload = true
+                    det_active = actor:active_detector() or nil
+                    if det_active then
+                        det_active:switch_state(2)
+                    end
+                    play_open_close_animation(weapon, ignore_override.delay)
+                    schedule_fake_reload_message(ignore_override.delay + BOLT_PUMP_MSG_OFFSET)
+                    return
+                else
+                    print_dbg("Ammo check for %s - ignore list override anim missing, using fake_reload_fallback.", sec)
+                end
+            end
+
             print_dbg("Ammo check for %s - in ignore list, using fake_reload_fallback=%s.", sec, fake_reload_fallback)
-            
+
             if fake_reload_fallback == 0 then
                 -- hide/show weapon
                 ac_pending_slot = actor:active_slot()
@@ -3542,14 +3860,7 @@ function check_Ammo(skip_animation)
 
                 -- eject one round if option enabled and there's ammo
                 if fake_reload_bolt_eject and currentAmmo > 0 then
-                    local ammo_section = get_vanilla_ammo_section(weapon)
-                    if ammo_section then
-                        weapon:set_ammo_elapsed(currentAmmo - 1)
-                        alife_create_item(ammo_section, actor, { ammo = 1 })
-                        print_dbg("Ejected round: %s (remaining: %d)", ammo_section, currentAmmo - 1)
-                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag, ac_pending_segments =
-                            get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
-                    end
+                    eject_round_for_cycle(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
                 end
 
                 play_hud_animation(weapon, bolt_config.anim, bolt_config.sound)
@@ -3571,14 +3882,7 @@ function check_Ammo(skip_animation)
 
                 -- eject one round if option enabled and there's ammo
                 if fake_reload_bolt_eject and currentAmmo > 0 then
-                    local ammo_section = get_vanilla_ammo_section(weapon)
-                    if ammo_section then
-                        weapon:set_ammo_elapsed(currentAmmo - 1)
-                        alife_create_item(ammo_section, actor, { ammo = 1 })
-                        print_dbg("Ejected round: %s (remaining: %d)", ammo_section, currentAmmo - 1)
-                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag, ac_pending_segments =
-                            get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
-                    end
+                    eject_round_for_cycle(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
                 end
 
                 play_open_close_animation(weapon, delay)
@@ -3627,14 +3931,7 @@ function check_Ammo(skip_animation)
 
                 -- eject one shell if option enabled, there's ammo, and weapon not excluded
                 if fake_reload_pump_eject and currentAmmo > 0 and not should_exclude_shell_eject(sec) then
-                    local ammo_section = get_vanilla_ammo_section(weapon)
-                    if ammo_section then
-                        weapon:set_ammo_elapsed(currentAmmo - 1)
-                        alife_create_item(ammo_section, actor, { ammo = 1 })
-                        print_dbg("Ejected shell: %s (remaining: %d)", ammo_section, currentAmmo - 1)
-                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag, ac_pending_segments =
-                            get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
-                    end
+                    eject_round_for_cycle(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
                 end
 
                 play_hud_animation(weapon, pump_config.anim, pump_config.sound)
@@ -3656,14 +3953,7 @@ function check_Ammo(skip_animation)
 
                 -- eject one shell if option enabled, there's ammo, and weapon not excluded
                 if fake_reload_pump_eject and currentAmmo > 0 and not should_exclude_shell_eject(sec) then
-                    local ammo_section = get_vanilla_ammo_section(weapon)
-                    if ammo_section then
-                        weapon:set_ammo_elapsed(currentAmmo - 1)
-                        alife_create_item(ammo_section, actor, { ammo = 1 })
-                        print_dbg("Ejected shell: %s (remaining: %d)", ammo_section, currentAmmo - 1)
-                        ac_pending_message, ac_pending_clr, ac_pending_ammo_type, ac_pending_separate_tag, ac_pending_segments =
-                            get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo - 1)
-                    end
+                    eject_round_for_cycle(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
                 end
 
                 play_open_close_animation(weapon, delay)

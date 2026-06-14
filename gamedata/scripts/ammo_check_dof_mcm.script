@@ -1,0 +1,50 @@
+-- AmmoCheck: SSFX Depth of Field on ammo check
+
+local enabled = false
+local active = false
+
+local function dof_available()
+    return ssfx_weapons_dof and ssfx_weapons_dof.ssfx_far_blur
+end
+
+local function set_dof(on)
+    if dof_available() then
+        ssfx_weapons_dof.ssfx_far_blur(on and 1 or 0, 0)
+    end
+end
+
+function actor_on_update()
+    if not (enabled and dof_available()) then
+        if active then set_dof(false) ; active = false end
+        return
+    end
+    local animating = ammo_check_mcm and ammo_check_mcm.is_check_animating
+        and ammo_check_mcm.is_check_animating()
+    if animating and not active then
+        set_dof(true) ; active = true
+    elseif (not animating) and active then
+        set_dof(false) ; active = false
+    end
+end
+
+function actor_on_net_destroy()
+    if active then set_dof(false) ; active = false end
+end
+
+function on_option_change()
+    if not ui_mcm then return end
+    local en = ui_mcm.get("rax_ammo_check/hud_behavior/dof_on_check")
+    enabled = (en == true or en == 1)
+    if not enabled and active then set_dof(false) ; active = false end
+end
+
+function actor_on_first_update()
+    on_option_change()
+end
+
+function on_game_start()
+    RegisterScriptCallback("actor_on_first_update", actor_on_first_update)
+    RegisterScriptCallback("on_option_change", on_option_change)
+    RegisterScriptCallback("actor_on_update", actor_on_update)
+    RegisterScriptCallback("actor_on_net_destroy", actor_on_net_destroy)
+end

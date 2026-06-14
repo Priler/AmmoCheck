@@ -1,0 +1,210 @@
+-- AmmoCheck: Floating Magazine HUD compatibility layer.
+-- Two render modes, both shown/hidden on our ammo-check animation lifecycle (covers fake-reload
+-- weapons) and both suppress our corner message while shown:
+--  OFF: drives the Immersive Ammo Check mod (mag_check_ui) so its
+--       own numeric readout + bar tracks the magazine. Needs that mod installed.
+--  ON: renders this mod's full status overlay (font, colors, ammo type/tag, all highlight modes) at
+--      the magazine bone, projected here. Works with or without that mod
+
+local enabled = false
+local use_our_text = false
+local show_bar = false
+local bone_debug = false
+local lib = nil
+
+local shown_his = false
+local shown_ours = false
+
+local string_find = string.find
+local world2ui = game.world2ui
+
+local SCREEN_W = 1024
+local SCREEN_H = 768
+local BONE_NOT_FOUND = 65535
+local OFFSCREEN_X = -9999
+
+
+-- @TODO: get this values from Immersive Ammo Check when it exists, and fallback to our own definitions otherwise
+local MAG_BONE_NAMES = {
+    "wpn_mag", "wpn_magazine", "wpn_magazin", "mag", "magazin", "magazine",
+    "mag_1", "magazin_1", "wpn_mag_1", "pmag", "clip", "shell_tube",
+    "cylinder", "wpn_cylinder", "drum", "barabashka"  -- revolvers
+}
+local BULLET_BONE_NAMES = {
+    "bullet_4", "bullet_3", "bullet_2", "bullet_1", "bullet", "bullets", "bullet1", "bullet2",
+    "wpn_bullet", "wpn_bullet_1", "wpn_bullet_2", "bullets1", "bullets2",
+    "wpn_magazine_bullet_2", "shell_2", "shell_tube"
+}
+
+-- the corner message is suppressed whenever the floating HUD will actually show: in ON mode our
+-- overlay always renders; in OFF mode only when the other mod (the renderer) is present
+function suppresses_message()
+    if not enabled then return false end
+    if use_our_text then return true end
+    return lib ~= nil
+end
+
+local function lib_ready()
+    return lib and lib.show_hud and lib.close_hud
+end
+
+-- project the magazine/round bone (HUD space) to a 1024x768 screen point, or nil. Reads the same
+-- per-weapon bone override key the Immersive Ammo Check mod ships, so its config still applies
+local function project_mag_bone(wpn, sec, current_ammo)
+    local bone_pos = nil
+    local found_name = nil
+
+    local ov_full  = ini_sys:r_string_ex(sec, "mag_check_ui_mag_bone")
+    local ov_empty = ini_sys:r_string_ex(sec, "mag_check_ui_mag_bone_empty")
+    if ov_full or ov_empty then
+        local bn = (current_ammo == 0 and ov_empty) or ov_full or ov_empty
+        if bn then
+            local bid = wpn:get_bone_id(bn, true)
+            if bid and bid ~= BONE_NOT_FOUND then
+                bone_pos = wpn:bone_position(bid, true)
+                if bone_pos then found_name = bn .. "(override)" end
+            end
+        end
+    end
+
+    if not bone_pos and current_ammo < 8
+       and (string_find(sec, "wpn_grot") or string_find(sec, "wpn_howa20")) then
+        local bid = wpn:get_bone_id("mag", true)
+        if bid and bid ~= BONE_NOT_FOUND then
+            bone_pos = wpn:bone_position(bid, true)
+            if bone_pos then found_name = "mag(grot/howa)" end
+        end
+    end
+
+    if not bone_pos then
+        -- search the most relevant list first
+        local primary   = (current_ammo == 0) and MAG_BONE_NAMES or BULLET_BONE_NAMES
+        local secondary = (current_ammo == 0) and BULLET_BONE_NAMES or MAG_BONE_NAMES
+        for _, list in ipairs({ primary, secondary }) do
+            for i = 1, #list do
+                local bid = wpn:get_bone_id(list[i], true)
+                if bid and bid ~= BONE_NOT_FOUND then
+                    local p = wpn:bone_position(bid, true)
+                    if p then bone_pos = p ; found_name = list[i] end
+                end
+            end
+            if bone_pos then break end
+        end
+    end
+
+    if not bone_pos then
+        -- universal last resort: the weapon root bone (id 0) always exists, so guns with no recognized
+        -- mag/round/cylinder bone (e.g. some revolvers) still anchor to the gun instead of a fixed spot
+        local p = wpn:bone_position(0, true)
+        if p then bone_pos = p ; found_name = "root(0)" end
+    end
+
+    if not bone_pos then
+        if bone_debug then printf("![AC-BONE] sec=%s ammo=%s NO_BONE (fallback position used)", tostring(sec), tostring(current_ammo)) end
+        return nil
+    end
+    local world = bone_pos:hud_to_world()
+    if not world then return nil end
+    local s = world2ui(world, false, true)
+    if not s or s.x == OFFSCREEN_X then return nil end
+    if bone_debug then printf("![AC-BONE] sec=%s ammo=%s bone=%s screen=%s,%s", tostring(sec), tostring(current_ammo), tostring(found_name), tostring(s.x), tostring(s.y)) end
+    return s
+end
+
+local function hide_his()
+    if shown_his and lib_ready() then lib.close_hud() end
+    shown_his = false
+end
+
+local function hide_ours()
+    if shown_ours and ammo_check_mcm and ammo_check_mcm.hide_maghud_overlay then
+        ammo_check_mcm.hide_maghud_overlay()
+    end
+    shown_ours = false
+end
+
+local function hide_all()
+    hide_his()
+    hide_ours()
+end
+
+local function drive_ours(wpn)
+    -- optional: render his progress bar too (his renderer with the text blanked via bar_only)
+    if show_bar and lib_ready() then
+        lib.bar_only = true
+        if not shown_his then lib.show_hud() ; shown_his = true end
+    else
+        hide_his()
+    end
+    if not (ammo_check_mcm and ammo_check_mcm.render_maghud_overlay) then return end
+    local current_ammo = wpn:get_ammo_in_magazine() or 0
+    local s = project_mag_bone(wpn, wpn:section(), current_ammo)
+    local x, y
+    if s then
+        x, y = s.x, s.y - 10
+    else
+        x, y = SCREEN_W / 2, 600
+    end
+    ammo_check_mcm.render_maghud_overlay(wpn, x, y)
+    shown_ours = true
+end
+
+local function drive_his()
+    hide_ours()
+    if not lib_ready() then return end
+    lib.bar_only = false  -- his own text + bar (this is his full readout mode)
+    if not shown_his then lib.show_hud() ; shown_his = true end
+end
+
+function actor_on_update()
+    if not enabled then
+        if shown_his or shown_ours then hide_all() end
+        return
+    end
+    local animating = ammo_check_mcm and ammo_check_mcm.is_check_animating
+        and ammo_check_mcm.is_check_animating()
+    if not animating then
+        if shown_his or shown_ours then hide_all() end
+        return
+    end
+    local wpn = db.actor and db.actor:active_item()
+    if not (wpn and IsWeapon(wpn)) then
+        if shown_his or shown_ours then hide_all() end
+        return
+    end
+    if use_our_text then
+        drive_ours(wpn)
+    else
+        drive_his()
+    end
+end
+
+function actor_on_net_destroy()
+    hide_all()
+end
+
+function on_option_change()
+    if not ui_mcm then return end
+    local en = ui_mcm.get("rax_ammo_check/maghud/enable")
+    enabled = (en == true or en == 1)
+    local ut = ui_mcm.get("rax_ammo_check/maghud/use_our_text")
+    use_our_text = (ut == true or ut == 1)
+    local sb = ui_mcm.get("rax_ammo_check/maghud/show_bar")
+    show_bar = (sb == true or sb == 1)
+    local bd = ui_mcm.get("rax_ammo_check/maghud/bone_debug")
+    bone_debug = (bd == true or bd == 1)
+    if not enabled then hide_all() end
+end
+
+function actor_on_first_update()
+    lib = mag_check_ui
+    if lib then lib.external = true end
+    on_option_change()
+end
+
+function on_game_start()
+    RegisterScriptCallback("actor_on_first_update", actor_on_first_update)
+    RegisterScriptCallback("on_option_change", on_option_change)
+    RegisterScriptCallback("actor_on_update", actor_on_update)
+    RegisterScriptCallback("actor_on_net_destroy", actor_on_net_destroy)
+end

@@ -355,9 +355,6 @@
     <string id="rax_ammo_check_animation_grenade_anim_mode_lst_gren_hide_show">
         <text>Скрыть/Показать</text>
     </string>
-    <string id="rax_ammo_check_animation_grenade_anim_mode_lst_gren_fake_reload">
-        <text>Ложная перезарядка (аним. заряжания гранаты)</text>
-    </string>
     <string id="rax_ammo_check_animation_grenade_anim_mode_lst_gren_message">
         <text>Только сообщение</text>
     </string>
@@ -581,7 +578,7 @@
         <text>Клавиша действия</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_onekey_key_reload_desc">
-        <text>Клавиша всех действий One Key. НЕ должна совпадать с штатной клавишей Перезарядки, иначе движок будет дополнительно перезаряжать при каждом нажатии. Рекомендация: переназначьте штатную Перезарядку на свободную клавишу, затем задайте здесь свою прежнюю клавишу Перезарядки (R).</text>
+        <text>Клавиша всех действий One Key. Может совпадать с клавишей перезарядки из настроек игры (по умолчанию R): One Key автоматически перехватит её и выполнит перезарядку сам, двойного срабатывания не будет. Любая другая клавиша тоже работает и не трогает обычную перезарядку.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_onekey_reload_key_unjams">
         <text>Нажатие устраняет задержку</text>
@@ -688,6 +685,12 @@
     <string id="ui_mcm_rax_ammo_check_onekey_doubletap_ms_desc">
         <text>Время, в течение которого второе нажатие считается двойным. Также задержка перед перезарядкой по одиночному нажатию, чтобы быстрое второе нажатие успело сменить тип патрона. Меньше - перезарядка отзывчивее, но окно двойного нажатия короче. По умолчанию 200.</text>
     </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_busy_instant_tap">
+        <text>Мгновенное действие во время анимаций (как в OKWC)</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_onekey_busy_instant_tap_desc">
+        <text>Повторяет поведение оригинального OneKey Weapon Controls: пока оружие в анимации (прицеливание, выстрел, доставание), нажатие сразу выполняет действие одиночного нажатия, не дожидаясь различения тапа, двойного нажатия и удержания. Максимально быстрая перезарядка во время анимаций, но удержание и двойное нажатие недоступны, пока оружие занято. Выкл: тап, двойное нажатие и удержание работают одинаково в любом состоянии оружия.</text>
+    </string>
     <string id="ui_mcm_rax_ammo_check_onekey_update_mcm">
         <text>Обновите MCM до 1.6.0 или новее, чтобы переназначить клавишу здесь. По умолчанию R.</text>
     </string>
@@ -777,13 +780,90 @@
     <string id="ui_mcm_rax_ammo_check_firemode_show_letter_desc">
         <text>Добавлять к сообщению букву режима: [S] одиночный, [B] очередь, [A] авто. Работает в стилях Текст, Нет и Точки. В стиле Нет это единственное, что отображается.</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_firemode_inspect_on_hold">
-        <text>Осмотр оружия при удержании</text>
+    <string id="ui_mcm_rax_ammo_check_firemode_tap_action">
+        <text>Tap Action</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_firemode_inspect_on_hold_desc">
-        <text>Удерживайте клавишу режима огня, чтобы проиграть анимацию осмотра оружия вместо показа текущего режима огня. Нажатие клавиши по-прежнему переключает режим огня. Если у оружия нет анимации осмотра, будет показан режим огня.</text>
+    <string id="ui_mcm_rax_ammo_check_firemode_tap_action_desc">
+        <text>What a single tap does. Switch: cycle to the next fire mode (hold the Previous Mode Modifier to go backwards). Check: show the current fire mode on screen. Inspect: play a weapon look-over animation. None: nothing.</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_firemode_ron_opacity">
+    <string id="rax_ammo_check_firemode_tap_action_lst_fa_none">
+        <text>None (Disabled)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_tap_action_lst_fa_switch">
+        <text>Switch Fire Mode (next/prev)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_tap_action_lst_fa_single">
+        <text>Set Single</text>
+    </string>
+    <string id="rax_ammo_check_firemode_tap_action_lst_fa_auto">
+        <text>Set Auto (or Burst)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_tap_action_lst_fa_check">
+        <text>Fire Mode Check</text>
+    </string>
+    <string id="rax_ammo_check_firemode_tap_action_lst_fa_inspect">
+        <text>Inspect Weapon</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_doubletap_action">
+        <text>Double-Tap Action</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_doubletap_action_desc">
+        <text>What a double-tap does. Switch: cycle to the next fire mode (modifier reverses). Check: show the current fire mode. Inspect: play a weapon look-over animation. None: double-tap does nothing, so the tap action fires immediately with no wait.</text>
+    </string>
+    <string id="rax_ammo_check_firemode_doubletap_action_lst_fa_none">
+        <text>None (Disabled)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_doubletap_action_lst_fa_switch">
+        <text>Switch Fire Mode (next/prev)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_doubletap_action_lst_fa_single">
+        <text>Set Single</text>
+    </string>
+    <string id="rax_ammo_check_firemode_doubletap_action_lst_fa_auto">
+        <text>Set Auto (or Burst)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_doubletap_action_lst_fa_check">
+        <text>Fire Mode Check</text>
+    </string>
+    <string id="rax_ammo_check_firemode_doubletap_action_lst_fa_inspect">
+        <text>Inspect Weapon</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_hold_action">
+        <text>Hold Action</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_hold_action_desc">
+        <text>What holding the key does. Check: show the current fire mode. Switch: cycle to the next fire mode (modifier reverses). Inspect: play a weapon look-over animation. None: holding does nothing, the press runs the tap action on release.</text>
+    </string>
+    <string id="rax_ammo_check_firemode_hold_action_lst_fa_none">
+        <text>None (Disabled)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_hold_action_lst_fa_switch">
+        <text>Switch Fire Mode (next/prev)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_hold_action_lst_fa_single">
+        <text>Set Single</text>
+    </string>
+    <string id="rax_ammo_check_firemode_hold_action_lst_fa_auto">
+        <text>Set Auto (or Burst)</text>
+    </string>
+    <string id="rax_ammo_check_firemode_hold_action_lst_fa_check">
+        <text>Fire Mode Check</text>
+    </string>
+    <string id="rax_ammo_check_firemode_hold_action_lst_fa_inspect">
+        <text>Inspect Weapon</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_hold_ms">
+        <text>Hold Time (ms)</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_hold_ms_desc">
+        <text>How long to hold the key before the Hold Action fires instead of the tap action. Lower feels snappier; too low may trigger on a slightly long tap. Default 200.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_doubletap_ms">
+        <text>Double-Tap Window (ms)</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_firemode_doubletap_ms_desc">
+        <text>Time window for a second tap to count as a double-tap. Also how long a single tap waits before firing, so a quick second tap can convert it to the Double-Tap Action. Lower makes the tap snappier but shrinks the double-tap window. Default 200.</text>
+    </string>    <string id="ui_mcm_rax_ammo_check_firemode_ron_opacity">
         <text>Прозрачность своей текстуры</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_ron_opacity_desc">
@@ -839,5 +919,88 @@
     <string id="ui_mcm_rax_ammo_check_keybind_mode_desc">
         <text>Как срабатывает клавиша проверки боезапаса: Нажатие (одиночное), Двойное нажатие или Удержание.</text>
     </string>
+    <!-- Eject Chambered Round -->
+    <string id="ui_mm_title_rax_ammo_check_eject">
+        <text>Извлечение патрона из патронника</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_desc">
+        <text>Одна клавиша извлекает патрон из патронника обратно в инвентарь и досылает следующий патрон из магазина. Полезно после смены магазина с опцией "1 в патроннике": извлеките старый патрон, чтобы следующий выстрел был из нового магазина. Болтовое и помповое оружие проигрывает анимацию передёргивания затвора.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_mags_note">
+        <text>Для оружия с магазинами требуется Anomaly Magazines Redux с включённой опцией "1 в патроннике". Оружие вне системы магазинов (болтовые винтовки с неотъёмным магазином вроде Мосина) извлекает патрон напрямую.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_enable">
+        <text>Включить</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_enable_desc">
+        <text>Главный переключатель функции извлечения патрона из патронника.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_key">
+        <text>Клавиша извлечения патрона</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_key_desc">
+        <text>Клавиша, извлекающая патрон из патронника. По умолчанию не назначена. Не назначайте её на клавишу перезарядки.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_modifier">
+        <text>Модификатор</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_modifier_desc">
+        <text>Необязательный модификатор, удерживаемый вместе с клавишей извлечения патрона. "Нет" означает, что клавиша работает сама по себе.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_camera_anim">
+        <text>Движение камеры на прочем оружии</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_camera_anim_desc">
+        <text>Оружие без анимации затвора проигрывает лёгкое движение камеры из Camera Reanimation Project (если установлен) плюс звук передёргивания. Выкл - только звук.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_auto_eject">
+        <text>Автоизвлечение несовпадающего патрона после перезарядки</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_auto_eject_desc">
+        <text>Если после перезарядки патрон в патроннике отличается от следующего патрона в новом магазине (например, старый FMJ перед свежим магазином с AP), оружие автоматически передёргивает затвор и патрон уходит в инвентарь, так что следующий выстрел будет из нового магазина. Совет: перезарядка с пустым патронником сама проигрывает полную анимацию перезарядки, поэтому извлечение патрона клавишей перед перезарядкой даёт тот же результат вручную.</text>
+    </string>
 
+    <!-- ### Floating Mag HUD -->
+    <string id="ui_mm_title_rax_ammo_check_maghud">
+        <text>Плавающий HUD магазина</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_desc">
+        <text>Крепит небольшой индикатор боезапаса к магазину оружия на экране во время анимации проверки магазина, чтобы считывать количество прямо с оружия, а не из угла экрана. Работает с оружием с осмотром и с ложной перезарядкой. Когда "Использовать текст и цвета AmmoCheck" ВЫКЛ, управляет собственным числовым счётчиком и полосой мода "Immersive Ammo Check" (тот мод должен быть установлен). Когда ВКЛ, рисует собственный стилизованный текст этого мода у магазина и не требует других модов.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_enable">
+        <text>Включить плавающий HUD магазина</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_enable_desc">
+        <text>Главный переключатель плавающего HUD магазина. По умолчанию ВЫКЛ. Режим по умолчанию требует мод "Immersive Ammo Check"; включите "Использовать текст и цвета AmmoCheck", чтобы работать без него.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_use_our_text">
+        <text>Использовать текст и цвета AmmoCheck</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_use_our_text_desc">
+        <text>Когда ВКЛ, плавающий HUD рисует полный текст состояния этого мода у магазина через кастомный рендер текста: ваш режим отображения, цвета, тип/тег патрона, все режимы подсветки (включая двухцветный и строку несоответствия) и выбранный шрифт/размер/тень. Работает с модом Immersive Ammo Check и без него. Полоса заполнения в этом режиме не показывается. Когда ВЫКЛ, показывается собственный числовой счётчик и полоса того мода (тот мод обязателен).</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_show_bar">
+        <text>Показывать полосу заполнения (с текстом AmmoCheck)</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_show_bar_desc">
+        <text>Когда ВКЛ, у магазина также рисуется полоса заполнения мода Immersive Ammo Check рядом с текстом этого мода. Применяется только когда включено "Использовать текст и цвета AmmoCheck" (в другом режиме полоса уже показывается). Требует установленного мода Immersive Ammo Check.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_req_note">
+        <text>Требует установленного мода "Immersive Ammo Check". (Исключение: "Использовать текст и цвета AmmoCheck" рисует самостоятельно и работает без него.)</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hud_behavior_dof_on_check">
+        <text>Глубина резкости при проверке</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hud_behavior_dof_on_check_desc">
+        <text>Размывает фон и фокусируется на оружии во время анимации проверки, затем плавно возвращает обратно по её окончании. Использует глубину резкости оружия из Screen Space Shaders и заданную там силу размытия; ничего не делает, если Screen Space Shaders не установлен.</text>
+    </string>
+    <string id="st_ac_no_grenade">
+        <text>Нет гранаты</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_bone_debug">
+        <text>Лог отладки привязки к кости</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_maghud_bone_debug_desc">
+        <text>Записывает в лог игры (xray_*.log) кость магазина, к которой привязывается плавающий HUD, и её позицию на экране при каждой проверке. Помогает понять, почему индикатор не держится на конкретном оружии: строки с меткой [AC-BONE] показывают найденную кость (или NO_BONE, если у оружия нет распознанной кости магазина/патрона). Применяется только к режиму "Использовать текст и цвета AmmoCheck". Для обычной игры оставьте ВЫКЛ.</text>
+    </string>
 </string_table>
