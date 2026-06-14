@@ -10,7 +10,10 @@ local enabled = false
 local use_our_text = false
 local show_bar = false
 local bone_debug = false
+local debug_mode = false
 local lib = nil
+
+local DUMP_BONES_KEY = DIK_keys.DIK_SLASH
 
 local shown_his = false
 local shown_ours = false
@@ -28,12 +31,14 @@ local OFFSCREEN_X = -9999
 local MAG_BONE_NAMES = {
     "wpn_mag", "wpn_magazine", "wpn_magazin", "mag", "magazin", "magazine",
     "mag_1", "magazin_1", "wpn_mag_1", "pmag", "clip", "shell_tube",
-    "cylinder", "wpn_cylinder", "drum", "barabashka"  -- revolvers
+    "cylinder", "wpn_cylinder", "drum", "barabashka",  -- revolvers
+    "mod_magazine"  -- RSh-12 and other EFT-rig revolvers (cylinder body)
 }
 local BULLET_BONE_NAMES = {
     "bullet_4", "bullet_3", "bullet_2", "bullet_1", "bullet", "bullets", "bullet1", "bullet2",
     "wpn_bullet", "wpn_bullet_1", "wpn_bullet_2", "bullets1", "bullets2",
-    "wpn_magazine_bullet_2", "shell_2", "shell_tube"
+    "wpn_magazine_bullet_2", "shell_2", "shell_tube",
+    "bullet001", "patron_in_weapon_001"  -- RSh-12 and other EFT-rig revolvers (first chambered round)
 }
 
 -- the corner message is suppressed whenever the floating HUD will actually show: in ON mode our
@@ -183,6 +188,42 @@ function actor_on_net_destroy()
     hide_all()
 end
 
+-- debug helper: log every bone name of the weapon in hand, so a magazine/round bone can be
+-- found for guns the floating HUD does not stick to (revolvers, exotic mags). HUD bones first,
+-- world bones only if the HUD skeleton enumerates nothing
+local function dump_bones()
+    local wpn = db.actor and db.actor:active_item()
+    if not (wpn and IsWeapon(wpn)) then
+        printf("![AC-BONE] dump: no weapon in hand")
+        return
+    end
+    local sec = wpn:section()
+    printf("![AC-BONE] dump start sec=%s", tostring(sec))
+    local found = 0
+    for id = 0, 255 do
+        local ok, name = pcall(wpn.bone_name, wpn, id, true)
+        if ok and name and name ~= "" then
+            found = found + 1
+            printf("![AC-BONE] hud id=%s name=%s", tostring(id), tostring(name))
+        end
+    end
+    if found == 0 then
+        for id = 0, 255 do
+            local ok, name = pcall(wpn.bone_name, wpn, id, false)
+            if ok and name and name ~= "" then
+                found = found + 1
+                printf("![AC-BONE] world id=%s name=%s", tostring(id), tostring(name))
+            end
+        end
+    end
+    printf("![AC-BONE] dump end sec=%s total=%s", tostring(sec), tostring(found))
+end
+
+function on_key_press(key)
+    if not debug_mode then return end
+    if key == DUMP_BONES_KEY then dump_bones() end
+end
+
 function on_option_change()
     if not ui_mcm then return end
     local en = ui_mcm.get("rax_ammo_check/maghud/enable")
@@ -191,8 +232,10 @@ function on_option_change()
     use_our_text = (ut == true or ut == 1)
     local sb = ui_mcm.get("rax_ammo_check/maghud/show_bar")
     show_bar = (sb == true or sb == 1)
-    local bd = ui_mcm.get("rax_ammo_check/maghud/bone_debug")
+    local bd = ui_mcm.get("rax_ammo_check/debug/bone_debug")
     bone_debug = (bd == true or bd == 1)
+    local dm = ui_mcm.get("rax_ammo_check/debug/debug_mode")
+    debug_mode = (dm == true or dm == 1)
     if not enabled then hide_all() end
 end
 
@@ -207,4 +250,5 @@ function on_game_start()
     RegisterScriptCallback("on_option_change", on_option_change)
     RegisterScriptCallback("actor_on_update", actor_on_update)
     RegisterScriptCallback("actor_on_net_destroy", actor_on_net_destroy)
+    RegisterScriptCallback("on_key_press", on_key_press)
 end

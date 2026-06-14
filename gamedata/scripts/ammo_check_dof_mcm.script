@@ -2,6 +2,9 @@
 
 local enabled = false
 local active = false
+local active_since = 0
+-- failsafe: never hold DoF longer than this
+local DOF_MAX_MS = 6000
 
 local function dof_available()
     return ssfx_weapons_dof and ssfx_weapons_dof.ssfx_far_blur
@@ -20,8 +23,11 @@ function actor_on_update()
     end
     local animating = ammo_check_mcm and ammo_check_mcm.is_check_animating
         and ammo_check_mcm.is_check_animating()
+    if animating and active and (time_global() - active_since) > DOF_MAX_MS then
+        animating = false  -- failsafe: force ease-out if a flag got stuck
+    end
     if animating and not active then
-        set_dof(true) ; active = true
+        set_dof(true) ; active = true ; active_since = time_global()
     elseif (not animating) and active then
         set_dof(false) ; active = false
     end

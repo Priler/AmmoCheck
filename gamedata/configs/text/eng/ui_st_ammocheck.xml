@@ -889,7 +889,7 @@
         <text>Transparency of the selected fire mode texture. 255 is fully opaque, 0 is invisible. Only applies to the Custom Texture display style.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_ron_hue">
-        <text>Custom Hue Tint</text>
+        <text>Custom Texture Hue Tint</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_ron_hue_desc">
         <text>Color tint for the selected fire mode texture. 0 leaves the texture's own color. 1-360 applies a hue. Use the no-text (white) variant for a clean tint; the red texture fights a colored tint. Only applies to the Custom Texture display style.</text>
@@ -1005,10 +1005,71 @@
     <string id="ui_mcm_rax_ammo_check_maghud_show_bar_desc">
         <text>When ON, also draw the Immersive Ammo Check mod's progress bar at the magazine alongside this mod's text. Only applies when "Use AmmoCheck Text and Colors" is ON (in the other mode the bar is already shown). Requires the Immersive Ammo Check mod installed.</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_maghud_bone_debug">
+
+    <!-- ### MCM section headers -->
+    <string id="ui_mcm_rax_ammo_check_hdr_message">
+        <text>Message</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_color">
+        <text>Color</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_content">
+        <text>Content</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_render">
+        <text>Custom Render</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_hud">
+        <text>HUD Elements</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_behavior">
+        <text>Behavior</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_mode">
+        <text>Mode</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_fallback">
+        <text>Fallbacks</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_fakereload">
+        <text>Fake Reload Mechanics</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_timing">
+        <text>Timing</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_controls">
+        <text>Controls</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_display">
+        <text>Display</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_texture">
+        <text>Custom Texture</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_speed">
+        <text>Controls &amp; Speed</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_throw">
+        <text>Mag Throw</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_trigger">
+        <text>Controls</text>
+    </string>
+
+    <!-- ### MCM notes -->
+    <string id="ui_mcm_rax_ammo_check_doubletap_delay_note">
+        <text>Enabling this adds a slight input delay, needed to tell a tap from a double-tap. For immediate actions, set the Double-Tap action to None: the Tap action then fires instantly.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_keybind_note">
+        <text>This keybind works alongside One Key Weapon Controls or on its own. Any combination is possible.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_debug_bone_debug">
         <text>Bone Tracking Debug Log</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_maghud_bone_debug_desc">
+    <string id="ui_mcm_rax_ammo_check_debug_bone_debug_desc">
         <text>Log the magazine bone the floating HUD anchors to, and its screen position, to the game log (xray_*.log) each check. Use it to find why the readout does not stick on a given weapon: lines tagged [AC-BONE] show the bone name found (or NO_BONE when the weapon has no recognized mag/round bone). Only applies to the "Use AmmoCheck Text and Colors" overlay. Leave OFF for normal play.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_debug_bone_dump_note">
+        <text>Press / (slash) while Debug Mode is ON to log every bone name of the weapon in hand. Lines are tagged [AC-BONE]. Use it to find a magazine or round bone for the Floating Mag HUD on weapons it does not stick to (revolvers, exotic mags), then set it as a per-weapon override.</text>
     </string>
 </string_table>

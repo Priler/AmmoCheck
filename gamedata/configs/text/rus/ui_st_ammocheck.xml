@@ -870,7 +870,7 @@
         <text>Прозрачность выбранной текстуры режима огня. 255 - полностью непрозрачно, 0 - невидимо. Действует только на стиль отображения "Своя текстура".</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_ron_hue">
-        <text>Оттенок своей текстуры</text>
+        <text>Оттенок цвета текстуры</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_ron_hue_desc">
         <text>Цветовой оттенок выбранной текстуры режима огня. 0 оставляет собственный цвет текстуры. 1-360 применяет оттенок. Для чистого оттенка используйте вариант без текста (белый); красная текстура искажает цветной оттенок. Действует только на стиль отображения "Своя текстура".</text>
@@ -997,10 +997,71 @@
     <string id="st_ac_no_grenade">
         <text>Нет гранаты</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_maghud_bone_debug">
+    <string id="ui_mcm_rax_ammo_check_debug_bone_debug">
         <text>Лог отладки привязки к кости</text>
     </string>
-    <string id="ui_mcm_rax_ammo_check_maghud_bone_debug_desc">
+    <string id="ui_mcm_rax_ammo_check_debug_bone_debug_desc">
         <text>Записывает в лог игры (xray_*.log) кость магазина, к которой привязывается плавающий HUD, и её позицию на экране при каждой проверке. Помогает понять, почему индикатор не держится на конкретном оружии: строки с меткой [AC-BONE] показывают найденную кость (или NO_BONE, если у оружия нет распознанной кости магазина/патрона). Применяется только к режиму "Использовать текст и цвета AmmoCheck". Для обычной игры оставьте ВЫКЛ.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_debug_bone_dump_note">
+        <text>Нажмите / (слэш), когда включён режим отладки, чтобы записать в лог все имена костей оружия в руках. Строки помечаются [AC-BONE]. Используйте, чтобы найти кость магазина или патрона для плавающего HUD на оружии, к которому он не привязывается (револьверы, нестандартные магазины), и затем задать её как переопределение для конкретного оружия.</text>
+    </string>
+
+    <!-- ### Заголовки разделов MCM -->
+    <string id="ui_mcm_rax_ammo_check_hdr_message">
+        <text>Сообщение</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_color">
+        <text>Цвет</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_content">
+        <text>Содержимое</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_render">
+        <text>Свой рендер</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_hud">
+        <text>Элементы HUD</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_behavior">
+        <text>Поведение</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_mode">
+        <text>Режим</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_fallback">
+        <text>Запасные анимации</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_fakereload">
+        <text>Механики фейкового перезаряда</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_timing">
+        <text>Тайминги</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_controls">
+        <text>Управление</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_display">
+        <text>Отображение</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_texture">
+        <text>Своя текстура</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_speed">
+        <text>Управление и скорость</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_throw">
+        <text>Выброс магазина</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_hdr_trigger">
+        <text>Управление</text>
+    </string>
+
+    <!-- ### Примечания MCM -->
+    <string id="ui_mcm_rax_ammo_check_doubletap_delay_note">
+        <text>Включение этого добавляет небольшую задержку ввода, нужную чтобы отличить нажатие от двойного нажатия. Для мгновенных действий установите действие двойного нажатия в "Нет" (None): тогда действие на нажатие сработает сразу.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_keybind_note">
+        <text>Эта клавиша работает как вместе с One Key Weapon Controls, так и без них. Любая комбинация возможна.</text>
     </string>
 </string_table>

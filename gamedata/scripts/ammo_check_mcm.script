@@ -127,6 +127,12 @@ local wpn_checking = nil        -- weapon being checked
 local det_active = nil          -- detector that was active before check
 local is_fake_reload = false    -- flag to prevent auto-check duplicate after fake reload
 
+-- sprint fake-reload compat (see install_lower_weapon_sprint_compat)
+ac_sprint_keep_anim = false     -- true when the sprint mod exposes hooks we can wrap to keep the anim
+ac_sprint_check_active = false  -- true while a sprint-time check animation is in flight
+local ac_sprint_was_lowered = false
+local AC_SPRINT_RESTORE_MAX = 2.5  -- failsafe: force-restore the sprint pose after this many seconds
+
 -- animation timing constants
 local FAKE_RELOAD_MSG_DELAY = 1.5       -- delay before showing message after fake reload
 local BOLT_PUMP_MSG_OFFSET = 0.8        -- additional delay offset for bolt/pump animations
@@ -1901,6 +1907,9 @@ function actor_on_hud_animation_end(item, section, motion, state, slot)
         ac_end_reload_block()
     end
 
+    -- close any sprint-time check window once its animation ends, handing the pose back to the sprint mod
+    if ac_sprint_check_active then ac_end_sprint_check() end
+
     -- Path A inspect finished: clear the flag here, not only at the next check_Ammo. Left set,
     -- it would keep hide_msg_on_inspect suppressing unrelated later messages (e.g. every auto-check after reload).
     -- Only one weapon HUD anim plays at a time, so any weapon anim ending while the flag is set means the inspect is over.
@@ -1913,18 +1922,19 @@ function actor_on_hud_animation_end(item, section, motion, state, slot)
         empty_mag_sound:stop()
         empty_mag_sound = nil
     end
-    
+
+    if is_fake_reload then
+        print_dbg("Fake reload animation ended: clearing anim flags%s", auto_check_reload and " (auto-check skipped)" or "")
+        is_fake_reload = false
+        do_ammo_check_anim = nil
+        wpn_checking = nil
+        return
+    end
+
     if not auto_check_reload then return end
     if not motion then return end
     if not item then return end
     if not IsWeapon(item) then return end
-    
-    -- skip if this was a fake reload (we already displayed the message)
-    if is_fake_reload then
-        print_dbg("Skipping auto-check: was fake reload")
-        is_fake_reload = false
-        return
-    end
     
     -- Anchor patterns to ^anm_ to avoid matching unrelated motion names
     -- (e.g., anm_chamber_open, anm_grenade_close, anm_preload).
@@ -2173,24 +2183,50 @@ end
 -- it is left alone. Our fake reload plays through play_hud_motion, which keeps the weapon logically idle
 -- (state 0), so that mod cuts it the moment sprint begins.
 --
--- Fix without touching that mod's files: it is loaded as the global table lower_weapon_sprint, and its
--- idle-poll function wait_for_animation_end(wpn) is the one that does the lowering. Wrap that function so
--- that while our fake reload is in flight it keeps re-polling (mirroring the mod's own busy-state branch)
--- instead of lowering. Once our animation ends (is_fake_reload clears) it hands straight back to the
--- original, which then lowers normally if the player is still sprinting. No-op when the mod is absent.
+-- Fix without touching that mod's files: it is loaded as the global table lower_weapon_sprint
+function ac_end_sprint_check()
+    if not ac_sprint_check_active then return end
+    ac_sprint_check_active = false
+    RemoveTimeEvent("ammo_check", "ac_sprint_restore")
+    -- if the player is still sprinting and the check left the weapon raised, drop it back so the sprint
+    -- pose resumes; the sprint mod takes over from here on its next movement event
+    if db.actor and ac_sprint_was_lowered and IsMoveState("mcSprint")
+       and not game.actor_weapon_lowered() then
+        game.actor_lower_weapon(true)
+    end
+    ac_sprint_was_lowered = false
+end
+
+function ac_sprint_restore_cb()
+    ac_end_sprint_check()
+    return true
+end
+
 function install_lower_weapon_sprint_compat()
     if not (lower_weapon_sprint and lower_weapon_sprint.wait_for_animation_end) then return end
 
     local lws_orig_wait = lower_weapon_sprint.wait_for_animation_end
     lower_weapon_sprint.wait_for_animation_end = function(wpn)
-        if is_fake_reload and wpn then
+        if (is_fake_reload or ac_sprint_check_active) and wpn then
             ResetTimeEvent("wait_for_animation_end", wpn:id(), 0.05)  -- keep waiting, do not lower yet
             return false
         end
         return lws_orig_wait(wpn)
     end
 
-    print_dbg("Lower Weapon Sprint detected: wait_for_animation_end wrapped for fake-reload compat")
+    -- Spaicrab variant: wrap the single lowering chokepoint so its post-animation re-lower (and any other
+    -- lowering path) is suppressed while our sprint-time check animation plays. Enables ac_sprint_keep_anim.
+    if lower_weapon_sprint.delay_lower_weapon then
+        local lws_orig_lower = lower_weapon_sprint.delay_lower_weapon
+        lower_weapon_sprint.delay_lower_weapon = function(...)
+            if ac_sprint_check_active then return true end  -- suppress lowering during our check
+            return lws_orig_lower(...)
+        end
+        ac_sprint_keep_anim = true
+        print_dbg("Lower Weapon Sprint (Spaicrab) detected: keeping check animation while sprinting")
+    else
+        print_dbg("Lower Weapon Sprint (Skieppy/unknown) detected: message-only while sprinting")
+    end
 end
 
 -- ### ANIMATION DEBUG SYSTEM
@@ -2332,6 +2368,8 @@ function debug_play_animation(anim_name)
 end
 
 -- MCM configuration
+local MCM_HDR_CLR = { 255, 255, 210, 150 }
+
 function on_mcm_load()
     return {
         id = "rax_ammo_check",
@@ -2339,15 +2377,31 @@ function on_mcm_load()
             -- ### Display
             { id = "display", sh = true, text = "ui_mcm_rax_ammo_check_title_display", gr = {
                 { id = "slide_display", type = "slide", link = "ui_options_slider_player", text = "ui_mcm_rax_ammo_check_title_display", size = { 512, 50 }, spacing = 20 },
+
+                { id = "hdr_message", type = "title", text = "ui_mcm_rax_ammo_check_hdr_message", align = "l", clr = MCM_HDR_CLR },
                 { id = "show_message", type = "check", val = 1, def = true },
                 { id = "hide_msg_on_inspect", type = "check", val = 1, def = false },
+                { id = "msg_duration", type = "track", val = 2, min = 1, max = 5, step = 0.5, def = 2 },
+
+                { id = "hdr_color", type = "title", text = "ui_mcm_rax_ammo_check_hdr_color", align = "l", clr = MCM_HDR_CLR },
                 { id = "usecolor", type = "check", val = 1, def = true },
                 { id = "color_ammo_type", type = "check", val = 1, def = true },
                 { id = "color_intensity", type = "track", val = 2, min = 30, max = 100, step = 10, def = 70 },
+                { id = "highlight_ammo_mode", type = "list", val = 2, def = 0,
+                    content = { { 0, "ham_none" }, { 1, "ham_whole" }, { 2, "ham_separate" }, { 3, "ham_combined" } }
+                },
+
+                { id = "hdr_content", type = "title", text = "ui_mcm_rax_ammo_check_hdr_content", align = "l", clr = MCM_HDR_CLR },
                 { id = "display_mode", type = "list", val = 2, def = 0,
                     content = { { 0, "dm_text" }, { 1, "dm_numeric" }, { 2, "dm_both" }, { 3, "dm_tarkov" } }
                 },
                 { id = "minimalist_bar", type = "check", val = 1, def = false },
+                { id = "show_ammo_type", type = "check", val = 1, def = false },
+                { id = "show_ammo_tag", type = "check", val = 1, def = true },
+                { id = "show_chamber_ammo", type = "check", val = 1, def = false },
+                { id = "show_chamber_mismatch", type = "check", val = 1, def = false },
+
+                { id = "hdr_render", type = "title", text = "ui_mcm_rax_ammo_check_hdr_render", align = "l", clr = MCM_HDR_CLR },
                 { id = "custom_render", type = "check", val = 1, def = true },
                 { id = "render_font_family", type = "list", val = 2, def = 0,
                     content = { { 0, "ff_graffiti" }, { 1, "ff_letterica" }, { 2, "ff_system" }, { 3, "ff_letterica_pure" } }
@@ -2359,41 +2413,38 @@ function on_mcm_load()
                     content = { { 0, "rp_tl" }, { 1, "rp_tr" }, { 2, "rp_center" }, { 3, "rp_bottom" }, { 8, "rp_br" }, { 9, "rp_bl" }, { 4, "rp_cursor_left" }, { 5, "rp_cursor_top" }, { 6, "rp_cursor_right" }, { 7, "rp_cursor_bottom" } }
                 },
                 { id = "render_cursor_gap", type = "track", val = 2, min = 0, max = 300, step = 10, def = 80 },
-                { id = "show_ammo_type", type = "check", val = 1, def = false },
-                { id = "show_ammo_tag", type = "check", val = 1, def = true },
-                { id = "show_chamber_ammo", type = "check", val = 1, def = false },
-                { id = "show_chamber_mismatch", type = "check", val = 1, def = false },
-                { id = "highlight_ammo_mode", type = "list", val = 2, def = 0,
-                    content = { { 0, "ham_none" }, { 1, "ham_whole" }, { 2, "ham_separate" }, { 3, "ham_combined" } }
-                },
-                { id = "msg_duration", type = "track", val = 2, min = 1, max = 5, step = 0.5, def = 2 },
-            }},
-
-            -- ### Floating Mag HUD (comp code lives in ammo_check_maghud_mcm.script
-            { id = "maghud", sh = true, text = "ui_mm_title_rax_ammo_check_maghud", gr = {
-                { id = "slide_maghud", type = "slide", link = "ui_options_slider_player", text = "ui_mm_title_rax_ammo_check_maghud", size = { 512, 50 }, spacing = 20 },
-                { id = "req_note", type = "desc", text = "ui_mcm_rax_ammo_check_maghud_req_note", clr = { 255, 175, 0, 0 } },
-                { id = "info_desc", type = "desc", text = "ui_mcm_rax_ammo_check_maghud_desc" },
-                { id = "enable", type = "check", val = 1, def = false },
-                { id = "use_our_text", type = "check", val = 1, def = false },
-                { id = "show_bar", type = "check", val = 1, def = false },
-                { id = "bone_debug", type = "check", val = 1, def = false },
             }},
 
             -- ### HUD / Behavior
             { id = "hud_behavior", sh = true, text = "ui_mcm_rax_ammo_check_title_hud_behavior", gr = {
                 { id = "slide_hud_behavior", type = "slide", link = "ui_options_slider_player", text = "ui_mcm_rax_ammo_check_title_hud_behavior", size = { 512, 50 }, spacing = 20 },
+
+                { id = "hdr_hud", type = "title", text = "ui_mcm_rax_ammo_check_hdr_hud", align = "l", clr = MCM_HDR_CLR },
                 { id = "hidecounter", type = "check", val = 1, def = true },
                 { id = "hideicon", type = "check", val = 1, def = true },
                 { id = "hide_hud", type = "check", val = 1, def = false },
+
+                { id = "hdr_behavior", type = "title", text = "ui_mcm_rax_ammo_check_hdr_behavior", align = "l", clr = MCM_HDR_CLR },
                 { id = "check_grenade_mode", type = "check", val = 1, def = false },
                 { id = "auto_check_reload", type = "check", val = 1, def = false },
                 { id = "dof_on_check", type = "check", val = 1, def = false },
             }},
 
+            -- ### Floating Mag HUD (comp code lives in ammo_check_maghud_mcm.script)
+            { id = "maghud", sh = true, text = "ui_mm_title_rax_ammo_check_maghud", gr = {
+                { id = "slide_maghud", type = "slide", link = "ui_options_slider_player", text = "ui_mm_title_rax_ammo_check_maghud", size = { 512, 50 }, spacing = 20 },
+                { id = "info_desc", type = "desc", text = "ui_mcm_rax_ammo_check_maghud_desc" },
+                { id = "req_note", type = "desc", text = "ui_mcm_rax_ammo_check_maghud_req_note", clr = { 255, 175, 0, 0 } },
+                { id = "enable", type = "check", val = 1, def = false },
+                { id = "use_our_text", type = "check", val = 1, def = false },
+                { id = "show_bar", type = "check", val = 1, def = false },
+            }},
+
             -- ### Animation
             { id = "animation", sh = true, text = "ui_mcm_rax_ammo_check_title_anim", gr = {
                 { id = "slide_animation", type = "slide", link = "ui_options_slider_player", text = "ui_mcm_rax_ammo_check_title_anim", size = { 512, 50 }, spacing = 20 },
+
+                { id = "hdr_mode", type = "title", text = "ui_mcm_rax_ammo_check_hdr_mode", align = "l", clr = MCM_HDR_CLR },
                 { id = "enable_animations", type = "check", val = 1, def = true },
                 { id = "anim_mode", type = "list", val = 2, def = 2,
                     content = { { 0, "anim_mode_default" }, { 1, "anim_mode_lower" }, { 2, "anim_mode_fake_reload" } }
@@ -2401,6 +2452,8 @@ function on_mcm_load()
                 { id = "grenade_anim_mode", type = "list", val = 2, def = 0,
                     content = { { 0, "gren_lower" }, { 1, "gren_hide_show" }, { 3, "gren_message" } }
                 },
+
+                { id = "hdr_fallback", type = "title", text = "ui_mcm_rax_ammo_check_hdr_fallback", align = "l", clr = MCM_HDR_CLR },
                 { id = "no_magazine_fallback", type = "list", val = 2, def = 1,
                     content = { { 0, "fallback_hide_show" }, { 1, "fallback_lower" }, { 2, "fallback_none" } }
                 },
@@ -2411,12 +2464,16 @@ function on_mcm_load()
                     content = { { 0, "empty_mag_reload_anim" }, { 1, "empty_mag_animate" }, { 2, "empty_mag_lower" } }
                 },
                 { id = "treat_one_chamber_as_non_empty", type = "check", val = 1, def = false },
+
+                { id = "hdr_fakereload", type = "title", text = "ui_mcm_rax_ammo_check_hdr_fakereload", align = "l", clr = MCM_HDR_CLR },
                 { id = "fake_reload_bolt_cycle", type = "check", val = 1, def = true },
                 { id = "force_bolt_cycle_external_mag", type = "check", val = 1, def = false },
                 { id = "fake_reload_bolt_eject", type = "check", val = 1, def = false },
                 { id = "fake_reload_pump_rack", type = "check", val = 1, def = true },
                 { id = "fake_reload_pump_eject", type = "check", val = 1, def = false },
                 { id = "fake_reload_ignore_list", type = "check", val = 1, def = true },
+
+                { id = "hdr_timing", type = "title", text = "ui_mcm_rax_ammo_check_hdr_timing", align = "l", clr = MCM_HDR_CLR },
                 { id = "busy_hands_delay", type = "track", val = 2, min = 0.5, max = 3, step = 0.25, def = 1 },
                 { id = "block_reload_during_check", type = "check", val = 1, def = true },
             }},
@@ -2424,6 +2481,7 @@ function on_mcm_load()
             -- ### Keybind
             { id = "keybind", sh = true, text = "ui_mcm_rax_ammo_check_title_keys", gr = {
                 { id = "slide_keybind", type = "slide", link = "ui_options_slider_player", text = "ui_mcm_rax_ammo_check_title_keys", size = { 512, 50 }, spacing = 20 },
+                { id = "combo_note", type = "desc", text = "ui_mcm_rax_ammo_check_keybind_note" },
                 { id = "keybind", type = "key_bind", val = 2, def = DIK_keys.DIK_F },
                 { id = "modifier", type = ui_mcm.kb_mod_radio, val = 2, def = 0,
                     content = { { 0, "mcm_kb_mod_none" }, { 1, "mcm_kb_mod_shift" }, { 3, "mcm_kb_mod_alt" } }
@@ -2440,25 +2498,14 @@ function on_mcm_load()
             { id = "firemode", sh = true, text = "ui_mcm_rax_ammo_check_title_firemode", gr = {
                 { id = "slide_firemode", type = "slide", link = "ui_options_slider_player", text = "ui_mcm_rax_ammo_check_title_firemode", size = { 512, 50 }, spacing = 20 },
                 { id = "info_desc", type = "desc", text = "ui_mcm_rax_ammo_check_firemode_desc" },
+                { id = "delay_note", type = "desc", text = "ui_mcm_rax_ammo_check_doubletap_delay_note", clr = { 255, 175, 0, 0 } },
                 { id = "enable", type = "check", val = 1, def = false },
+
+                { id = "hdr_controls", type = "title", text = "ui_mcm_rax_ammo_check_hdr_controls", align = "l", clr = MCM_HDR_CLR },
                 { id = "key", type = "key_bind", val = 2, def = DIK_keys.DIK_X },
                 { id = "modifier_prev", type = ui_mcm.kb_mod_radio, val = 2, def = 1,
                     content = { { 1, "mcm_kb_mod_shift" }, { 2, "mcm_kb_mod_ctrl" }, { 3, "mcm_kb_mod_alt" } }
                 },
-                { id = "color_text", type = "check", val = 1, def = true },
-                { id = "display_style", type = "list", val = 0, def = "text",
-                    content = { { "text", "ds_text" }, { "none", "ds_none" }, { "dots", "ds_dots" }, { "dots_alt", "ds_dots_alt" }, { "custom_texture", "ds_custom" } }
-                },
-                { id = "texture", type = "list", val = 0, def = "ron_text",
-                    content = { { "ron_text", "tx_ron_text" }, { "ron_notext", "tx_ron_notext" }, { "bwais", "tx_bwais" } }
-                },
-                { id = "ron_opacity", type = "track", val = 2, min = 0, max = 255, step = 5, def = 255 },
-                { id = "ron_hue", type = "track", val = 2, min = 0, max = 360, step = 1, def = 0 },
-                { id = "ron_y_offset", type = "track", val = 2, min = -400, max = 400, step = 5, def = 0 },
-                { id = "position", type = "list", val = 0, def = "default",
-                    content = { { "default", "pos_default" }, { "screen_bottom", "pos_bottom" } }
-                },
-                { id = "show_letter", type = "check", val = 1, def = false },
                 { id = "tap_action", type = "list", val = 0, def = "switch",
                     content = { { "none", "fa_none" }, { "switch", "fa_switch" }, { "set_single", "fa_single" }, { "set_auto", "fa_auto" }, { "check", "fa_check" }, { "inspect", "fa_inspect" } }
                 },
@@ -2470,6 +2517,25 @@ function on_mcm_load()
                 },
                 { id = "hold_ms", type = "track", val = 2, min = 100, max = 600, step = 25, def = 200 },
                 { id = "doubletap_ms", type = "track", val = 2, min = 50, max = 500, step = 25, def = 200 },
+
+                { id = "hdr_display", type = "title", text = "ui_mcm_rax_ammo_check_hdr_display", align = "l", clr = MCM_HDR_CLR },
+                { id = "color_text", type = "check", val = 1, def = true },
+                { id = "display_style", type = "list", val = 0, def = "text",
+                    content = { { "text", "ds_text" }, { "none", "ds_none" }, { "dots", "ds_dots" }, { "dots_alt", "ds_dots_alt" }, { "custom_texture", "ds_custom" } }
+                },
+                { id = "position", type = "list", val = 0, def = "default",
+                    content = { { "default", "pos_default" }, { "screen_bottom", "pos_bottom" } }
+                },
+                { id = "show_letter", type = "check", val = 1, def = false },
+
+                { id = "hdr_texture", type = "title", text = "ui_mcm_rax_ammo_check_hdr_texture", align = "l", clr = MCM_HDR_CLR },
+                { id = "texture", type = "list", val = 0, def = "ron_text",
+                    content = { { "ron_text", "tx_ron_text" }, { "ron_notext", "tx_ron_notext" }, { "bwais", "tx_bwais" } }
+                },
+                { id = "ron_opacity", type = "track", val = 2, min = 0, max = 255, step = 5, def = 255 },
+                { id = "ron_hue", type = "track", val = 2, min = 0, max = 360, step = 1, def = 0 },
+                { id = "ron_y_offset", type = "track", val = 2, min = -400, max = 400, step = 5, def = 0 },
+
                 { id = "desc_update_mcm", type = "desc", text = "ui_mcm_rax_ammo_check_onekey_update_mcm", clr = { 255, 175, 0, 0 },
                     precondition = { function() return not mcm_keybinds end }
                 },
@@ -2479,7 +2545,10 @@ function on_mcm_load()
             { id = "onekey", sh = true, text = "ui_mm_title_rax_ammo_check_onekey", gr = {
                 { id = "slide_onekey", type = "slide", link = "ui_options_slider_player", text = "ui_mm_title_rax_ammo_check_onekey", size = { 512, 50 }, spacing = 20 },
                 { id = "info_desc", type = "desc", text = "ui_mcm_rax_ammo_check_onekey_desc" },
+                { id = "delay_note", type = "desc", text = "ui_mcm_rax_ammo_check_doubletap_delay_note", clr = { 255, 175, 0, 0 } },
                 { id = "enable", type = "check", val = 1, def = false },
+
+                { id = "hdr_controls", type = "title", text = "ui_mcm_rax_ammo_check_hdr_controls", align = "l", clr = MCM_HDR_CLR },
                 { id = "key_reload", type = "key_bind", val = 2, def = DIK_keys.DIK_R },
                 { id = "reload_key_unjams", type = "check", val = 1, def = false },
                 { id = "focuses_pda", type = "check", val = 1, def = false },
@@ -2509,18 +2578,22 @@ function on_mcm_load()
                 { id = "info_desc", type = "desc", text = "ui_mcm_rax_ammo_check_fastreload_desc" },
                 { id = "mags_note", type = "desc", text = "ui_mcm_rax_ammo_check_fastreload_mags_note", clr = { 255, 175, 0, 0 } },
                 { id = "enable", type = "check", val = 1, def = false },
+
+                { id = "hdr_speed", type = "title", text = "ui_mcm_rax_ammo_check_hdr_speed", align = "l", clr = MCM_HDR_CLR },
                 { id = "modifier", type = ui_mcm.kb_mod_radio, val = 2, def = 1,
                     content = { { 1, "mcm_kb_mod_shift" }, { 2, "mcm_kb_mod_ctrl" }, { 3, "mcm_kb_mod_alt" } }
                 },
                 { id = "speed_mult", type = "track", val = 2, min = 1, max = 1.5, step = 0.05, def = 1.25 },
                 { id = "max_combined_speed", type = "track", val = 2, min = 1, max = 2, step = 0.05, def = 1.5 },
+                { id = "slowdown_enable", type = "check", val = 1, def = false },
+                { id = "slowdown_pct", type = "track", val = 2, min = 0, max = 25, step = 1, def = 10 },
+
+                { id = "hdr_throw", type = "title", text = "ui_mcm_rax_ammo_check_hdr_throw", align = "l", clr = MCM_HDR_CLR },
                 { id = "keep_last_mag", type = "check", val = 1, def = true },
                 { id = "throw_direction", type = "list", val = 0, def = "forward",
                     content = { { "drop", "td_drop" }, { "forward", "td_forward" }, { "right", "td_right" }, { "left", "td_left" }, { "backward", "td_back" }, { "down", "td_down" } }
                 },
                 { id = "throw_force", type = "track", val = 2, min = 0, max = 100, step = 5, def = 40 },
-                { id = "slowdown_enable", type = "check", val = 1, def = false },
-                { id = "slowdown_pct", type = "track", val = 2, min = 0, max = 25, step = 1, def = 10 },
             }},
 
             -- ### Eject Round (logic lives in ammo_check_eject_mcm.script)
@@ -2529,10 +2602,14 @@ function on_mcm_load()
                 { id = "info_desc", type = "desc", text = "ui_mcm_rax_ammo_check_eject_desc" },
                 { id = "mags_note", type = "desc", text = "ui_mcm_rax_ammo_check_eject_mags_note", clr = { 255, 175, 0, 0 } },
                 { id = "enable", type = "check", val = 1, def = false },
+
+                { id = "hdr_trigger", type = "title", text = "ui_mcm_rax_ammo_check_hdr_trigger", align = "l", clr = MCM_HDR_CLR },
                 { id = "key", type = "key_bind", val = 2, def = DIK_keys.DIK_ESCAPE },
                 { id = "modifier", type = ui_mcm.kb_mod_radio, val = 2, def = 0,
                     content = { { 0, "mcm_kb_mod_none" }, { 1, "mcm_kb_mod_shift" }, { 2, "mcm_kb_mod_ctrl" }, { 3, "mcm_kb_mod_alt" } }
                 },
+
+                { id = "hdr_behavior", type = "title", text = "ui_mcm_rax_ammo_check_hdr_behavior", align = "l", clr = MCM_HDR_CLR },
                 { id = "camera_anim", type = "check", val = 1, def = true },
                 { id = "auto_eject", type = "check", val = 1, def = false },
             }},
@@ -2541,6 +2618,8 @@ function on_mcm_load()
             { id = "debug", sh = true, text = "ui_mcm_rax_ammo_check_title_debug", gr = {
                 { id = "slide_debug", type = "slide", link = "ui_options_slider_player", text = "ui_mcm_rax_ammo_check_title_debug", size = { 512, 50 }, spacing = 20 },
                 { id = "debug_mode", type = "check", val = 1, def = false },
+                { id = "bone_debug", type = "check", val = 1, def = false },
+                { id = "bone_dump_note", type = "desc", text = "ui_mcm_rax_ammo_check_debug_bone_dump_note", clr = { 255, 175, 0, 0 } },
             }},
         }
     }
@@ -3284,6 +3363,20 @@ function check_Ammo(skip_animation)
                 print_dbg("Ammo check for %s - bolt-action override_inspect, ignoring inspect anim.", sec)
                 has_proper_inspect = false
             end
+        end
+    end
+
+    if not skip_animation and IsMoveState("mcSprint") then
+        if ac_sprint_keep_anim then
+            print_dbg("Ammo check for %s - sprinting, keeping animation (sprint-mod compat).", sec)
+            ac_sprint_check_active = true
+            ac_sprint_was_lowered = game.actor_weapon_lowered() or false
+            if ac_sprint_was_lowered then game.actor_lower_weapon(false) end  -- raise for the check
+            RemoveTimeEvent("ammo_check", "ac_sprint_restore")
+            CreateTimeEvent("ammo_check", "ac_sprint_restore", AC_SPRINT_RESTORE_MAX, ac_sprint_restore_cb)
+        else
+            print_dbg("Ammo check for %s - sprinting, showing message only (sprint-mod compat).", sec)
+            skip_animation = true
         end
     end
 
