@@ -5,6 +5,15 @@ local active = false
 local active_since = 0
 -- failsafe: never hold DoF longer than this
 local DOF_MAX_MS = 6000
+-- ease DoF out up to this many ms BEFORE the check animation ends, so the blur is gone a touch
+-- ahead of the weapon settling back to idle.
+local DOF_LEAD_OUT_MS = 1000
+-- but always keep the blur on screen at least this long, so short anims (e.g. anm_bore) do not
+-- flash the DoF for a split second. The lead-out shrinks to protect this floor.
+local DOF_MIN_VISIBLE_MS = 600
+-- latch so the early ease-out fires once per check and does not re-trigger DoF if a follow-up
+-- motion (e.g. shotgun open then close) plays after we eased out.
+local eased_out = false
 
 local function dof_available()
     return ssfx_weapons_dof and ssfx_weapons_dof.ssfx_far_blur
@@ -14,6 +23,15 @@ local function set_dof(on)
     if dof_available() then
         ssfx_weapons_dof.ssfx_far_blur(on and 1 or 0, 0)
     end
+end
+
+-- predicted time_global() (ms) when the active check animation ends, from ammo_check_mcm
+-- (authoritative: it knows the exact motion played)
+local function check_ends_at()
+    if ammo_check_mcm and ammo_check_mcm.check_anim_ends_at then
+        return ammo_check_mcm.check_anim_ends_at() or 0
+    end
+    return 0
 end
 
 function actor_on_update()
@@ -26,15 +44,34 @@ function actor_on_update()
     if animating and active and (time_global() - active_since) > DOF_MAX_MS then
         animating = false  -- failsafe: force ease-out if a flag got stuck
     end
-    if animating and not active then
+
+    if animating and active then
+        local ends_at = check_ends_at()
+        if ends_at > 0 then
+            local total = ends_at - active_since
+            local lead = DOF_LEAD_OUT_MS
+            if total - lead < DOF_MIN_VISIBLE_MS then
+                lead = total - DOF_MIN_VISIBLE_MS
+            end
+            if lead < 0 then lead = 0 end
+            if time_global() >= (ends_at - lead) then
+                set_dof(false) ; active = false ; eased_out = true
+                return
+            end
+        end
+    end
+
+    if animating and not active and not eased_out then
         set_dof(true) ; active = true ; active_since = time_global()
-    elseif (not animating) and active then
-        set_dof(false) ; active = false
+    elseif (not animating) and (active or eased_out) then
+        if active then set_dof(false) ; active = false end
+        eased_out = false
     end
 end
 
 function actor_on_net_destroy()
     if active then set_dof(false) ; active = false end
+    eased_out = false
 end
 
 function on_option_change()

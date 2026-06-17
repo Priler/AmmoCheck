@@ -5,6 +5,32 @@
 		<folder source="gamedata" destination="gamedata" />
 	</requiredInstallFiles>
 	<installSteps order="Explicit">
+		<installStep name="GAMMA Version">
+			<optionalFileGroups order="Explicit">
+				<group name="Which G.A.M.M.A. version do you use?" type="SelectExactlyOne">
+					<plugins order="Explicit">
+						<plugin name="G.A.M.M.A. 0.9.5">
+							<description>Select this if you run G.A.M.M.A. 0.9.5 (the latest). Installs the weapon check animations matched to that modpack version.</description>
+							<files>
+								<file source="dependencies\gamma\0.9.5\ammo_check_weapons.script" destination="gamedata\scripts\ammo_check_weapons.script" priority="1" />
+							</files>
+							<typeDescriptor>
+								<type name="Recommended" />
+							</typeDescriptor>
+						</plugin>
+						<plugin name="G.A.M.M.A. 0.9.4">
+							<description>Select this if you run G.A.M.M.A. 0.9.4. Installs the weapon check animations matched to that modpack version.</description>
+							<files>
+								<file source="dependencies\gamma\0.9.4\ammo_check_weapons.script" destination="gamedata\scripts\ammo_check_weapons.script" priority="1" />
+							</files>
+							<typeDescriptor>
+								<type name="Optional" />
+							</typeDescriptor>
+						</plugin>
+					</plugins>
+				</group>
+			</optionalFileGroups>
+		</installStep>
 		<installStep name="Dependency Scripts">
 			<optionalFileGroups order="Explicit">
 				<group name="-" type="SelectAny">

@@ -67,6 +67,7 @@ local ac_cooldown_until = 0  -- time_global() value (ms) when the ammo-check-key
 local ac_last_weapon_id = 0  -- weapon id the previous check was for. If the player switches weapons, the next key press resets cooldown + hides stale text and proceeds with the new weapon.
 local ac_message_until = 0   -- time_global() value (ms) when the displayed message visually disappears. Tracked separately from cooldown because msg_duration (1-5s) may outlive the cooldown (3s) - we hide the stale message before processing the next press.
 local ac_anim_block_until = 0  -- time_global() (ms) upper bound for the reload-block window. While set and the weapon is non-idle (the check animation is playing), on_before_key_press blocks the reload bind so it cannot cut the animation short.
+local ac_check_anim_ends_at = 0  -- time_global() (ms) when the current check animation is predicted to finish, computed from the played motion's length. 0 = unknown. Read by the DoF module to ease the blur out slightly before the anim ends (authoritative here, since this side knows the exact motion played and is immune to the mutator's anm_bore to anm_ammo_check rewrite).
 
 -- Fixed cooldown window for the ammo-check key, independent of msg_duration (which only
 -- affects how long the text stays on screen). Keep short so the player can re-trigger
@@ -1724,8 +1725,15 @@ local function get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAm
             end
             print_dbg("Ammo index: %s (%.1f%%, %d/%d)", idx, level_perc * 100, level_count, max_ammo)
 
-            local msg_id = messages[idx].m
-            local lvl_clr = use_clr and messages[idx].c or clr06_White
+            -- guard the lookup: a conflicting build or partial install can leave messages
+            -- (or an entry) non-table, which would hard-CTD on the field access
+            local entry = type(messages) == "table" and messages[idx]
+            if type(entry) ~= "table" then
+                print_dbg("get_ammo_status: bad messages entry at idx=%s (got %s)", tostring(idx), type(entry))
+                entry = { m = "st_ac_full", c = clr06_White }
+            end
+            local msg_id = entry.m
+            local lvl_clr = use_clr and entry.c or clr06_White
             msg_key = msg_id
             clr = lvl_clr
 
@@ -2009,6 +2017,7 @@ function actor_on_hud_animation_end(item, section, motion, state, slot)
     -- Only one weapon HUD anim plays at a time, so any weapon anim ending while the flag is set means the inspect is over.
     if ac_pending_inspect_anim_playing and item and IsWeapon(item) then
         ac_pending_inspect_anim_playing = false
+        ac_check_anim_ends_at = 0
     end
 
     -- stop empty mag sound if playing (handles cancelled animations)
@@ -2022,6 +2031,7 @@ function actor_on_hud_animation_end(item, section, motion, state, slot)
         is_fake_reload = false
         do_ammo_check_anim = nil
         wpn_checking = nil
+        ac_check_anim_ends_at = 0
         return
     end
 
@@ -2207,7 +2217,10 @@ end
 local function ac_cancel_active_check(reason)
     if not (is_fake_reload or do_ammo_check_anim or ac_pending_inspect_anim_playing) then return end
     print_dbg("Ammo check interrupted by %s - cancelling pending message/events.", reason)
-    if game.stop_hud_motion then game.stop_hud_motion() end
+    -- The fake reload runs on weapon:play_hud_motion (the item HUD layer), not the
+    -- engine script-anim layer, so game.stop_hud_motion cannot cancel it and only logs
+    -- "invalid script_anim_part 255" when no script anim is live. ADS/fire/reload taking
+    -- over the HUD overrides the overlay on its own.
     ac_clear_anim_cam_effectors()
     RemoveTimeEvent("ammo_check", "message_delay")
     RemoveTimeEvent("ammo_check", "defer_to_idle")
@@ -2227,6 +2240,7 @@ local function ac_cancel_active_check(reason)
     end
     ac_cooldown_until = 0
     ac_last_weapon_id = 0
+    ac_check_anim_ends_at = 0
     ac_end_reload_block()
     if ac_overlay then ac_overlay:hide() end
     ac_message_until = 0
@@ -2915,6 +2929,36 @@ local function schedule_fake_reload_message(delay)
     CreateTimeEvent("ammo_check", "message_delay", delay, delayed_display_callback)
 end
 
+-- Safe "lower the weapon" fallback for ammo checks with no usable inspect/reload animation.
+-- Break-action shotguns (class WP_BM16: toz34, bm16, etc.) define anm_reload_1/anm_reload_2 but
+-- no plain anm_reload and no anm_bore/anm_ammo_check, so they reach the generic fallback with
+-- nothing safe to play
+local function ac_lower_weapon_fallback(sec)
+    ac_suppress_inspect_until = time_global() + 1500
+    RemoveTimeEvent("ammo_check", "ac_unstick_bore")
+    local _unstick_start = time_global()
+    CreateTimeEvent("ammo_check", "ac_unstick_bore", 0, function()
+        local w = db.actor and db.actor:active_item()
+        if not (w and IsWeapon(w)) then return true end
+        if w:get_state() == 4 then
+            w:switch_state(0)
+            return true
+        end
+        return time_global() - _unstick_start > 1500
+    end)
+    game.actor_lower_weapon(true)
+    CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
+    local lower_time = SYS_GetParam(2, sec, "weapon_lower_speed", 1.0) or 1.0
+    local raise_delay = math_max(busy_hands_delay + 0.2, lower_time * 1.7 + 0.2)
+    RemoveTimeEvent("ammo_check", "ac_lower_raise")
+    CreateTimeEvent("ammo_check", "ac_lower_raise", raise_delay, function()
+        if db.actor and game.actor_weapon_lowered() then
+            game.actor_lower_weapon(false)
+        end
+        return true
+    end)
+end
+
 -- pre-defined callback for restore weapon after hide
 local function restore_weapon_callback()
     local actor = db.actor
@@ -2969,6 +3013,22 @@ end
 
 -- play HUD animation directly by name
 -- this bypasses the state machine and plays the animation directly
+-- Record when the current check animation will finish (time_global ms), from the played motion's
+-- length. extra_ms adds a fixed lead (e.g. the open->close gap)
+local function ac_predict_anim_end(sec, anim_name, extra_ms)
+    ac_check_anim_ends_at = 0
+    if not (game and game.get_motion_length and sec and anim_name) then return end
+    local hud_sec = ini_sys:r_string_ex(sec, "hud") or sec
+    local len = game.get_motion_length(hud_sec, anim_name, 1)
+    if len and len > 0 then
+        ac_check_anim_ends_at = time_global() + len + (extra_ms or 0)
+    end
+end
+
+function check_anim_ends_at()
+    return ac_check_anim_ends_at
+end
+
 local function play_hud_animation(weapon, anim_name, sound_param)
     local sec = weapon:section()
     
@@ -2994,7 +3054,9 @@ local function play_hud_animation(weapon, anim_name, sound_param)
         print_dbg("play_hud_animation: Failed to play '%s' on %s: %s", anim_name, sec, tostring(err))
         return false
     end
-    
+
+    ac_predict_anim_end(sec, anim_name)
+
     -- play the associated sound if available
     if sound_param then
         local sound_file = ini_sys:r_string_ex(sec, sound_param)
@@ -3079,9 +3141,12 @@ local function play_open_close_animation(weapon, delay_time)
         end
     end
     
+    -- predicted end: the open->close gap plus the close motion length
+    ac_predict_anim_end(sec, "anm_close", delay * 1000)
+
     -- schedule close animation after delay
     CreateTimeEvent("AmmoCheck_BoltCycle", "close"..wpn_id, delay, play_close_animation, weapon, "snd_close_weapon")
-    
+
     return true
 end
 
@@ -3112,8 +3177,9 @@ local function play_reload_animation(weapon)
                     weapon:play_hud_motion("anm_reload", true, 7, 1, 0)
                 end)
                 weapon:set_ammo_elapsed(0)
-                
+
                 if success then
+                    ac_predict_anim_end(sec, "anm_reload")
                     local sound_file = ini_sys:r_string_ex(sec, "snd_reload")
                     if sound_file and sound_file ~= "$no_sound" then
                         if empty_mag_sound and empty_mag_sound:playing() then
@@ -3153,8 +3219,9 @@ local function play_reload_animation(weapon)
         local success = pcall(function()
             weapon:play_hud_motion("anm_reload", true, 7, 1, 0)
         end)
-        
+
         if success then
+            ac_predict_anim_end(sec, "anm_reload")
             local sound_file = ini_sys:r_string_ex(sec, "snd_reload")
             if sound_file and sound_file ~= "$no_sound" then
                 if empty_mag_sound and empty_mag_sound:playing() then
@@ -3447,6 +3514,7 @@ function check_Ammo(skip_animation)
     ac_cooldown_until = now + AC_COOLDOWN_MS
     ac_last_weapon_id = weaponId
     ac_message_until = 0  -- reset; will be set by display_ammo_status when the new message displays
+    ac_check_anim_ends_at = 0  -- reset; set by the path that actually plays an anim this press
 
     -- get ammo status using shared function
     local message, clr, ammo_type, separate_tag, segments = get_ammo_status(weapon, weaponId, sec, in_grenade_mode, currentAmmo)
@@ -3527,7 +3595,6 @@ function check_Ammo(skip_animation)
             if _w:get_state() ~= 0 then
                 if _elapsed > 2500 and not _forced_idle then
                     print_dbg("Ammo check deferred: weapon still busy after 2.5s, forcing idle to un-stick.")
-                    if level.stop_hud_motion then level.stop_hud_motion() end
                     _w:switch_state(0)
                     _forced_idle = true
                     return false
@@ -3748,9 +3815,6 @@ function check_Ammo(skip_animation)
             end)
 
             -- cancel any started animation and camera effects
-            if level.stop_hud_motion then
-                level.stop_hud_motion()
-            end
             weapon:switch_state(0)  -- switch to idle
             
             -- remove weapon camera effectors (they use random IDs 5000-10000)
@@ -3782,6 +3846,12 @@ function check_Ammo(skip_animation)
         
         -- has proper inspect and magazine is loaded (or internal mag) - let native animation play
         print_dbg("Ammo check for %s - has proper inspect animation, NOT interfering.", sec)
+        -- predict the end from whichever inspect variant the mutator will settle on, so the DoF
+        -- module can ease out before it finishes (engine plays it; we do not call play_hud_animation).
+        local inspect_anm = (has_animation(sec, "anm_ammo_check") and "anm_ammo_check")
+            or (has_animation(sec, "anm_ammo_check_empty") and "anm_ammo_check_empty")
+            or (has_animation(sec, "anm_ammo_check_no_mag") and "anm_ammo_check_no_mag")
+        if inspect_anm then ac_predict_anim_end(sec, inspect_anm) end
         ac_pending_inspect_anim_playing = true  -- gates hide_msg_on_inspect
         -- Arm the mutator (path-A-only flag) so it can override the engine's anm_bore choice
         -- with anm_ammo_check / _empty / _no_mag when state 4 fires. Using a dedicated flag
@@ -3993,6 +4063,15 @@ function check_Ammo(skip_animation)
         
         -- check 1: break-action shotgun (TOZ-34 style)
         local break_config = get_break_action_config(sec)
+
+        -- Per-weapon empty exclusion: with no shells the inspect anim reads wrong, so flagged
+        -- break-actions just lower the weapon when empty
+        if break_config and break_config.empty_lower and currentAmmo == 0 then
+            print_dbg("Ammo check for %s - break-action empty, lowering weapon instead of inspect.", sec)
+            ac_lower_weapon_fallback(sec)
+            return
+        end
+
         if break_config and has_animation(sec, break_config.anim) then
             print_dbg("Ammo check for %s - break-action, using %s animation.", sec, break_config.anim)
             
@@ -4319,8 +4398,9 @@ function check_Ammo(skip_animation)
                 if current_ammo == 0 then
                     weapon:set_ammo_elapsed(0)  -- restore immediately
                 end
-                
+
                 if success then
+                    ac_predict_anim_end(sec, "anm_reload")
                     -- play sound manually - store it so we can stop on cancel
                     local sound_file = ini_sys:r_string_ex(sec, "snd_reload")
                     if sound_file and sound_file ~= "$no_sound" then
@@ -4337,9 +4417,18 @@ function check_Ammo(skip_animation)
             elseif has_animation(sec, "anm_bore") then
                 play_hud_animation(weapon, "anm_bore", "snd_bore")
             else
-                game.actor_lower_weapon(true)
+                -- No usable inspect/reload anim (e.g. break-action shotguns). Lower the weapon
+                -- safely instead
+                do_ammo_check_anim = nil
+                is_fake_reload = false
+                if det_active then
+                    db.actor:show_detector(true)
+                    det_active = nil
+                end
+                ac_lower_weapon_fallback(sec)
+                return
             end
-            
+
             schedule_fake_reload_message(FAKE_RELOAD_MSG_DELAY)
             CreateTimeEvent("ammo_check", "restore_det", 0.1, restore_detector_after_anim, weapon)
             return

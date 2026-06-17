@@ -60,10 +60,6 @@ ammo_check_override = {
         force_anim = "anm_ammo_check", force_sound = "snd_ammo_check", -- force is for "Force Bolt Cycle External Mag"
     },
 
-    ["wpn_toz106_m1"] = { anim = "anm_bore", sound = "snd_bore", delay = 0.6 },
-    ["wpn_bm16"] = { anim = "anm_bore", sound = "snd_bore" },
-    ["wpn_saiga12s"] = { anim = "anm_bore", sound = "snd_bore" },
-
     -- Other shapes you can use for any weapon:
     -- ["wpn_example_a"] = { fake_reload = true },                       -- default uses standard fake reload
     -- ["wpn_example_b"] = { fallback = true },                          -- default uses fake_reload_fallback (lower / hide)
@@ -111,8 +107,6 @@ bolt_action_rifles = {
 
     ["wpn_sks_molot"] = { delay = 1.3 },
 
-    -- ["wpn_winchester1873"] = { delay = 1.2 },
-
     -- External-mag bolt-action variants. Default: fake reload (anm_reload).
     -- With MCM "force_bolt_cycle_external_mag" ON: play explicit bolt cycle using the
     -- delay/anim below. Longer prefixes here override shorter base prefixes (e.g. wpn_k98).
@@ -128,7 +122,7 @@ bolt_action_rifles = {
     -- ["wpn_sks"] = { delay = 0.5 },
     -- ["wpn_sv98"] = { delay = 0.7 },
     -- ["wpn_svd"] = { delay = 0.6 },
-    ["wpn_mosin"] = { delay = 1.2 }, -- vanilla Mosin: enable explicit bolt cycle
+    -- ["wpn_mosin"] = { delay = 0.8 },
 }
 
 
@@ -136,9 +130,7 @@ bolt_action_rifles = {
 -- These play anm_open -> delay -> anm_close (pump rack)
 -- Format: [prefix] = { delay = seconds_between_open_and_close }
 pump_action_shotguns = {
-    -- ["wpn_ks23"] = { delay = 0.6 }, -- in GAMMA 0.9.5 it now has a new animation, so anm_open/close not valid anymore
-    ["wpn_ks23"] = { anim = "anm_bore", sound = "snd_bore", delay = 0.6 }, -- bore animation fits better in GAMMA 0.9.5
-
+    ["wpn_ks23"] = { delay = 0.6 },
     ["wpn_mp155"] = { delay = 0.8 },
     -- ["wpn_ithacam37"] = { delay = 0.5 },
     ["wpn_mp133"] = { delay = 0.5 },
@@ -209,11 +201,6 @@ sniper_animations = {
 
     ["wpn_gauss"] = { anim = "anm_reload", sound = "snd_reload" },
 
-    ["wpn_sks_b"] = { anim = "anm_bore", sound = "snd_bore" },
-    ["wpn_sks_molot"] = { anim = "anm_bore", sound = "snd_bore" },
-
-    ["wpn_winchester1873"] = { anim = "anm_bore", sound = "snd_bore" },
-
     -- ["wpn_svu"] = { anim = "anm_bore", sound = "snd_bore" },
     -- ["wpn_wa2000"] = { delay = 0.5 },
 }
@@ -228,12 +215,7 @@ sniper_animations = {
 --   [prefix] = false  -- explicit override (use when a longer-named variant shouldn't
 --                        inherit a shorter prefix's true. E.g. wpn_mosin = true catches
 --                        wpn_mosin_k by prefix, so wpn_mosin_k = false opts it back out.)
---   [prefix] = { anim = "animation_name", sound = "sound_param" }
---                     -- like true (skips the non-immersive fake reload), but instead of the
---                        plain fallback it plays this custom check animation/sound. Same shape
---                        as sniper_animations. A { delay = N } form plays anm_open/anm_close
---                        over N seconds when those animations exist.
--- Longest-prefix match wins (a table counts as "ignore" for the longest-prefix decision).
+-- Longest-prefix match wins.
 ignore_fake_animations = {
     ["wpn_g36ka4_rwap"] = true, -- Mag Palming (non-immersive)
     ["wpn_g36c_rwap"] = true, -- Mag Palming (non-immersive)
@@ -248,13 +230,9 @@ ignore_fake_animations = {
     ["wpn_m16"] = true, -- drops magazine (non-immersive)
     ["wpn_vintorez_nimble"] = true, -- drops magazine (non-immersive)
 
-    ["wpn_fal_sa58_osw"] = true, -- drops magazine (non-immersive)
-
-    ["wpn_mosin"] = false,        -- vanilla Mosin: allow bolt_action_rifles handling instead of ignore fallback
+    ["wpn_mosin"] = true,         -- full ammo change (non-immersive) -- vanilla mosin only
     ["wpn_mosin_k"] = false,      -- Kmack Mosin Trio variant: opt back out (bolt_action_rifles handles it)
     ["wpn_mosin_carbine"] = false, -- Kmack Mosin Trio variant: opt back out
-
-    ["wpn_desert_eagle"] = { anim = "anm_bore", sound = "snd_bore" }, -- this one mag palms magazine, use bore instead
 
     -- Vanilla anomaly guns
     -- ["wpn_usp_nimble"] = true, -- drops magazine (non-immersive)
@@ -489,40 +467,6 @@ function should_ignore_fake_animations(sec)
 
     config_cache[cache_key] = best_val
     return best_val
-end
-
--- Returns the custom anim/sound override table for sec when its longest-matching ignore entry is a
--- table, otherwise nil. The longest-prefix winner here is the SAME one should_ignore_fake_animations
--- picks, so a table both flags the weapon as ignored AND supplies the animation to play instead of
--- the plain fallback. A plain true/false winner returns nil (no custom anim).
-function get_ignore_fake_animation_override(sec)
-    if not sec then return nil end
-
-    local cache_key = "ignore_override_" .. sec
-    if config_cache[cache_key] ~= nil then
-        if config_cache[cache_key] == false then return nil end
-        return config_cache[cache_key]
-    end
-
-    local best_len = 0
-    local best_val = nil
-    for prefix, value in pairs(ignore_fake_animations) do
-        if sec == prefix or string.find(sec, "^" .. prefix) then
-            local len = string.len(prefix)
-            if len > best_len then
-                best_len = len
-                best_val = value
-            end
-        end
-    end
-
-    if type(best_val) == "table" then
-        config_cache[cache_key] = best_val
-        return best_val
-    end
-
-    config_cache[cache_key] = false
-    return nil
 end
 
 function should_exclude_shell_eject(sec)
