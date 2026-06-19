@@ -682,6 +682,7 @@ local fm_down_t       = 0      -- time_global of the current press, 0 when idle
 local fm_hold_fired   = false  -- the hold action already fired for this press
 local fm_last_press_t = 0      -- time_global of the previous press, for double-tap detection
 local fm_pending_tap  = false  -- a single-tap action is scheduled
+local fm_mod_at_down  = false  -- reverse modifier state captured at key-down (latched for the deferred tap)
 
 -- Run one configured action: tap / double-tap / hold all pick from the same set, so a single
 -- dispatcher serves all three. "none" (and anything unknown) does nothing
@@ -694,7 +695,9 @@ local function do_fm_action(action, weapon)
         -- cycle the fire mode (modifier reverses direction). No-op on a single-mode weapon or while busy
         if not (has_multiple_fire_modes(weapon) and is_weapon_ready(weapon)) then return end
         local old_fire_mode = weapon:cast_Weapon():GetFireMode()
-        if ui_mcm.get_mod_key(mcm_modifier_prev) then
+        -- latched key-down state OR a live read: a quick reverse-modifier + tap releases the
+        -- modifier before the deferred tap action runs, so reading it live alone would miss it
+        if fm_mod_at_down or ui_mcm.get_mod_key(mcm_modifier_prev) then
             prev_fire_mode(weapon, old_fire_mode)
         else
             next_fire_mode(weapon, old_fire_mode)
@@ -753,6 +756,8 @@ function on_key_press(key)
     fm_last_press_t = now
     fm_down_t = now
     fm_hold_fired = false
+    -- capture the reverse modifier now, while the key is down and it is reliably held
+    fm_mod_at_down = ui_mcm.get_mod_key(mcm_modifier_prev) and true or false
 end
 
 function on_key_hold(key)

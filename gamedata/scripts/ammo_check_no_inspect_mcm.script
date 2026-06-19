@@ -207,17 +207,16 @@ function try_reload_inspect(weapon)
     return played
 end
 
--- Public: force a proper WPO weapon inspection (bored animation + free no-jam shot) on a NON-jammed
+-- Public: force a proper weapon inspection (bored animation + free no-jam shot) on a NON-jammed
 -- weapon, bypassing the "No Inspect on Unjam" suppression
--- Needed for OKWC "Force WPO weapon inspect" option to work work (you got it, right?)
 function force_wpo_inspect(weapon)
     if not (arti_jamming and orig_unjam) then return false end
     weapon = weapon or (db.actor and db.actor:active_item())
     if not weapon then return false end
     if arti_jamming.get_jammed and arti_jamming.get_jammed(weapon:id()) then return false end
-    orig_unjam(weapon)
-    print_dbg("![AC-NIU] force_wpo_inspect: ran on %s", weapon:section())
-    return true
+    local played = play_nonjammed_inspect(weapon)
+    print_dbg("![AC-NIU] force_wpo_inspect: played=%s sec=%s", tostring(played), weapon:section())
+    return played
 end
 
 -- Install our wrapper once. unjam_wep is an alias the engine/other mods may call, so route it too

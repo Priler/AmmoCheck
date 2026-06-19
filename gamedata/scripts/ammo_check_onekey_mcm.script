@@ -216,6 +216,7 @@ local okr_hold_fired      = false  -- ammo check already fired for this hold
 local okr_last_press_t    = 0      -- time_global of the previous press, for double-tap detection
 local okr_pending_reload  = false  -- a single-tap reload/unjam is scheduled
 local okr_pending_unjam   = false  -- the pending single action is unjam (modifier was held)
+local okr_mod_at_down     = false  -- unjam modifier state captured at key-down (latched for the release read)
 
 -- The configured One-Key key, which may be the very key the vanilla Reload control is bound to:
 -- in that case okr_owns_reload_bind() is true, Mags' handler is suppressed (plus the reload wrap
@@ -455,8 +456,10 @@ function on_before_key_press(key, bind, dis, flags)
     okr_last_press_t = now
     okr_down_t = now
     okr_hold_fired = false
+    -- Capture the unjam modifier NOW, while the key is down and the modifier is reliably held
+    okr_mod_at_down = ui_mcm.get_mod_key(mcm_modifier_unjam) and true or false
 
-    if OKR_DEBUG then printf("[AC-OKR] key down: ammo=%s", tostring(ammo_now())) end
+    if OKR_DEBUG then printf("[AC-OKR] key down: ammo=%s mod=%s", tostring(ammo_now()), tostring(okr_mod_at_down)) end
 end
 
 function on_key_hold(key)
@@ -493,7 +496,7 @@ function on_key_release(key)
     -- The double-tap window is measured press-to-press, so the time the key was held already
     -- counts against it: only wait out the REMAINDER, not a full window on top of the release.
     -- A ~120 ms tap then resolves ~80 ms later instead of 200 ms later.
-    okr_pending_unjam = ui_mcm.get_mod_key(mcm_modifier_unjam) and true or false
+    okr_pending_unjam = okr_mod_at_down or (ui_mcm.get_mod_key(mcm_modifier_unjam) and true or false)
     okr_pending_reload = true
     if OKR_DEBUG then printf("[AC-OKR] tap release: single (%s)", okr_pending_unjam and "unjam" or "reload") end
     if mcm_doubletap_behavior == "none" then
