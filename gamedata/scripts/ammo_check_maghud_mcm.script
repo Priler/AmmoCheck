@@ -111,7 +111,9 @@ local function project_mag_bone(wpn, sec, current_ammo)
                 local bid = wpn:get_bone_id(list[i], true)
                 if bid and bid ~= BONE_NOT_FOUND then
                     local p = wpn:bone_position(bid, true)
-                    if p then bone_pos = p ; found_name = list[i] end
+                    -- take the FIRST listed bone that resolves: the lists are priority-ordered,
+                    -- so stop here instead of letting a later entry overwrite it
+                    if p then bone_pos = p ; found_name = list[i] ; break end
                 end
             end
             if bone_pos then break end

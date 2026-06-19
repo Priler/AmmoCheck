@@ -321,8 +321,9 @@ local function auto_eject_check()
     return true
 end
 
-function actor_on_weapon_reload(actor, weapon, ammo_total)
+function actor_on_weapon_reload(reloaded_wpn, ammo_total)
     if not auto_eject then return end
+    -- refetch via active_item on purpose: this fires at reload START and refires on switch_state(7)
     local wpn = db.actor and db.actor:active_item()
     if not (wpn and IsWeapon(wpn)) then return end
     auto_started_at = time_global()

@@ -2890,7 +2890,11 @@ function on_option_change()
     end
 
     -- update HUD elements (cached access)
-    local hud_states = ActorMenu.get_maingame().m_ui_hud_states
+    -- get_maingame is nil outside a live game (e.g. MCM
+    -- applied with no actor), so guard it or the index below CTDs
+    local maingame = ActorMenu.get_maingame()
+    if not maingame then return end
+    local hud_states = maingame.m_ui_hud_states
     local ammo_counter = hud_states.m_ui_weapon_cur_ammo
     local ammo_icon = hud_states.m_ui_weapon_icon
 
@@ -3816,16 +3820,10 @@ function check_Ammo(skip_animation)
 
             -- cancel any started animation and camera effects
             weapon:switch_state(0)  -- switch to idle
-            
-            -- remove weapon camera effectors (they use random IDs 5000-10000)
-            if level.check_cam_effector and level.remove_cam_effector then
-                for id = 5000, 10000 do
-                    if level.check_cam_effector(id) then
-                        level.remove_cam_effector(id)
-                    end
-                end
-            end
-            
+
+            -- remove weapon camera effectors
+            ac_clear_anim_cam_effectors()
+
             -- apply no_magazine_fallback
             if no_magazine_fallback == 0 then
                 -- hide/show weapon

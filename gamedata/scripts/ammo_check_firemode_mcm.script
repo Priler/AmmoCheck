@@ -520,11 +520,13 @@ end
 -- This list is 1-based (Lua); SetFireMode wants a 0-based index into this same list.
 local function effective_fire_modes(weapon)
     local modes = parse_list(ini_sys, weapon:section(), "fire_modes")
+    -- upgrade iteration order is engine-defined; stop at the FIRST upgrade that redefines
+    -- fire_modes so the result is deterministic instead of last-writer-wins
     weapon:iterate_installed_upgrades(function(upgr_sec)
         local prop_sec = ini_sys:r_string_ex(upgr_sec, "section")
         if prop_sec then
             local up = parse_list(ini_sys, prop_sec, "fire_modes")
-            if up and #up > 0 then modes = up end
+            if up and #up > 0 then modes = up ; return true end
         end
     end)
     return modes

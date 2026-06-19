@@ -30,7 +30,7 @@ local mcm_busy_instant_tap    = false      -- legacy OKWC mode: a non-idle press
 -- key_bind only resolves on MCM 1.6.0+; guard reads with the defaults above.
 local mcm_keybinds = ui_mcm and ui_mcm.key_hold
 
-local OKR_DEBUG = true  -- set true to print key/reload tracing to xray log, entries are "[AC-OKR]"
+local OKR_DEBUG = false  -- set true to print key/reload tracing to xray log, entries are "[AC-OKR]"
 
 local function ammo_now()
     local w = db.actor and db.actor:active_item()

@@ -5,12 +5,36 @@
 		<folder source="gamedata" destination="gamedata" />
 	</requiredInstallFiles>
 	<installSteps order="Explicit">
-		<installStep name="GAMMA Version">
+		<installStep name="Common Animation Scripts">
 			<optionalFileGroups order="Explicit">
-				<group name="Which G.A.M.M.A. version do you use?" type="SelectExactlyOne">
+				<group name="-" type="SelectAny">
 					<plugins order="Explicit">
+						<plugin name="Common animation scripts">
+							<description>Usually you don't need these scripts since most weapon mods already include them. Don't install them if you run G.A.M.M.A., it already has them. Install only if your weapon checks fail with missing animation errors.</description>
+							<files>
+								<folder source="dependencies\gamedata" destination="gamedata" priority="0" />
+							</files>
+							<typeDescriptor>
+								<type name="Optional" />
+							</typeDescriptor>
+						</plugin>
+					</plugins>
+				</group>
+			</optionalFileGroups>
+		</installStep>
+		<installStep name="Modpack Version">
+			<optionalFileGroups order="Explicit">
+				<group name="Which modpack do you use?" type="SelectExactlyOne">
+					<plugins order="Explicit">
+						<plugin name="Vanilla Anomaly / Custom Modpack">
+							<description>Select this if you play vanilla Anomaly or any non-G.A.M.M.A. modpack. Keeps the default weapon check config that ships with AmmoCheck. Installs no extra files.</description>
+							<files />
+							<typeDescriptor>
+								<type name="Optional" />
+							</typeDescriptor>
+						</plugin>
 						<plugin name="G.A.M.M.A. 0.9.5">
-							<description>Select this if you run G.A.M.M.A. 0.9.5 (the latest). Installs the weapon check animations matched to that modpack version.</description>
+							<description>Select this if you run G.A.M.M.A. 0.9.5. Installs the weapon check animations matched to that modpack version.</description>
 							<files>
 								<file source="dependencies\gamma\0.9.5\ammo_check_weapons.script" destination="gamedata\scripts\ammo_check_weapons.script" priority="1" />
 							</files>
@@ -22,23 +46,6 @@
 							<description>Select this if you run G.A.M.M.A. 0.9.4. Installs the weapon check animations matched to that modpack version.</description>
 							<files>
 								<file source="dependencies\gamma\0.9.4\ammo_check_weapons.script" destination="gamedata\scripts\ammo_check_weapons.script" priority="1" />
-							</files>
-							<typeDescriptor>
-								<type name="Optional" />
-							</typeDescriptor>
-						</plugin>
-					</plugins>
-				</group>
-			</optionalFileGroups>
-		</installStep>
-		<installStep name="Dependency Scripts">
-			<optionalFileGroups order="Explicit">
-				<group name="-" type="SelectAny">
-					<plugins order="Explicit">
-						<plugin name="Common animation scripts">
-							<description>Usually you don't need to install those scripts since they come included with a lot of weapon mods by default. Also don't install them if you are running G.A.M.M.A., it already has them.</description>
-							<files>
-								<folder source="dependencies\gamedata" destination="gamedata" priority="0" />
 							</files>
 							<typeDescriptor>
 								<type name="Optional" />
