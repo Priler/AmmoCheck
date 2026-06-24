@@ -1047,6 +1047,8 @@ end
 -- lang independent fix
 local AMMO_TYPE_OVERRIDES = {
     { prefix = "ammo_9x19_pbp", type = "hp", tag = "(HP)" },
+    -- treat ammo_9x39_pab9 (SP-5) as FMJ
+    { prefix = "ammo_9x39_pab9", type = "fmj", tag = "(FMJ)" },
 }
 
 local function classify_ammo_type(section)
@@ -2083,7 +2085,7 @@ local function mag_check_animation(anm_table, obj)
     if wpn_checking and obj and wpn_checking:id() == obj:id() and do_ammo_check_anim == 2 then
         wpn_checking = nil
         do_ammo_check_anim = nil
-        
+
         if det_active then
             db.actor:show_detector(true)
         end
@@ -2265,8 +2267,9 @@ function ac_on_weapon_reload()
     ac_cancel_active_check("reload")
 end
 
--- verdatim
 function check_for_no_inspect(anim_table, obj)
+    -- Only a HUD motion on the WEAPON can interrupt a pending inspect
+    if obj and not IsWeapon(obj) then return end
     if not string_find(anim_table.anm_name, "ammo_check") then
         -- a non-inspect HUD anim started while an inspect was mid-play (e.g. shoot interrupt):
         -- drop the lingering inspect cam effector and the pending corner message
@@ -2756,6 +2759,9 @@ function on_mcm_load()
                 { id = "modifier", type = ui_mcm.kb_mod_radio, val = 2, def = 0,
                     content = { { 0, "mcm_kb_mod_none" }, { 1, "mcm_kb_mod_shift" }, { 2, "mcm_kb_mod_ctrl" }, { 3, "mcm_kb_mod_alt" } }
                 },
+                { id = "mode", type = ui_mcm.kb_mod_radio, val = 2, def = 0,
+                    content = { { 0, "mcm_kb_mode_press" }, { 1, "mcm_kb_mode_dtap" }, { 2, "mcm_kb_mode_hold" } }
+                },
 
                 { id = "hdr_behavior", type = "title", text = "ui_mcm_rax_ammo_check_hdr_behavior", align = "l", clr = MCM_HDR_CLR },
                 { id = "camera_anim", type = "check", val = 1, def = true },
@@ -3024,7 +3030,7 @@ local function restore_detector_after_anim(weapon)
         db.actor:show_detector(true)
         det_active = nil
     end
-    
+
     -- clear animation state
     do_ammo_check_anim = nil
     wpn_checking = nil
@@ -3455,6 +3461,19 @@ local function should_exclude_shell_eject(sec)
     return false
 end
 
+local function should_ignore_no_mag_anim(sec)
+    if ammo_check_weapons and ammo_check_weapons.should_ignore_no_mag_anim then
+        return ammo_check_weapons.should_ignore_no_mag_anim(sec)
+    end
+    return false
+end
+
+-- True when the weapon ships a USABLE dedicated no-mag inspect: it has anm_ammo_check_no_mag
+-- and is not listed in no_mag_anim_exclude
+local function ac_has_no_mag_anim(sec)
+    return has_animation(sec, "anm_ammo_check_no_mag") and not should_ignore_no_mag_anim(sec)
+end
+
 -- Decide whether an ammo check on this weapon would fall back to the no-magazine fallback in path A:
 -- weapon has a proper inspect anim (so the ENGINE inspect, triggered by the ammo-check key, would
 -- play), it is mags-supported, has NO magazine, and has no dedicated anm_ammo_check_no_mag. In that
@@ -3476,8 +3495,8 @@ function ac_should_block_inspect_no_mag(weapon, sec)
         return false
     end
 
-    -- a dedicated no-mag inspect should play, not the fallback
-    if has_animation(sec, "anm_ammo_check_no_mag") then return false end
+    -- a dedicated no-mag inspect should play, not the fallback (unless this weapon is excluded)
+    if ac_has_no_mag_anim(sec) then return false end
 
     if not magazines then return false end
     -- read the mag state BEFORE is_supported_weapon (it lazily creates a full default mag for unbound
@@ -3670,7 +3689,13 @@ function check_Ammo(skip_animation)
             -- Clear the guard cooldown set by the first call so the recursion isn't blocked.
             ac_cooldown_until = 0
             ac_last_weapon_id = 0
-            check_Ammo()
+            -- Trampoline onto a separate queue id instead of calling check_Ammo() here
+            -- temp optimized_time_events.script crash fix (more like a workaround bruh)
+            RemoveTimeEvent("ac_defer_run", "go")
+            CreateTimeEvent("ac_defer_run", "go", 0, function()
+                check_Ammo()
+                return true
+            end)
             return true
         end)
         return
@@ -3845,7 +3870,7 @@ function check_Ammo(skip_animation)
         -- play that animation instead of the fallback. Fall through to the native inspect path; the
         -- mutator picks the _no_mag variant. The fallback only applies when no such animation exists,
         -- so the regular mag-check animation never plays when there is no magazine to check.
-        if needs_no_mag_fallback and has_animation(sec, "anm_ammo_check_no_mag") then
+        if needs_no_mag_fallback and ac_has_no_mag_anim(sec) then
             print_dbg("Ammo check for %s - no mag but has anm_ammo_check_no_mag, playing it (ignoring no_magazine_fallback).", sec)
             needs_no_mag_fallback = false
         end
@@ -3912,7 +3937,7 @@ function check_Ammo(skip_animation)
         CreateTimeEvent("ammo_check", "message_delay", busy_hands_delay, delayed_display_callback)
         return
     end
-    
+
     -- [ B) weapon DOES NOT have proper mag inspect ]--
     
     -- B.1) default mode: hide/show weapon

@@ -335,7 +335,7 @@ end
 -- texture name for the chosen Fire Mode Texture
 local function fm_ron_texture()
     if mcm_ron_texture == "bwais" then
-        return "ui\\bwais_firemode_indicators"
+        return "ui\\rax_ammocheck_firemode_bwais"
     end
     local notext = (mcm_ron_texture == "ron_notext")
     if notext then

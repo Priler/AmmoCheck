@@ -802,7 +802,7 @@
         <text>Fire Mode Texture</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_texture_desc">
-        <text>Which selector graphic the Custom Texture display style draws. Ready or Not: a fire-selector with baked mode text. Ready or Not (no text): the same graphic without the text. Color ON draws it red, OFF white. BWais's texture: uses the atlas from BWais FireModeCheck (that mod must be installed) and is tinted by the Hue/Opacity options. The selector body (with or without a burst position) is derived from the weapon's own fire modes, so it works for any weapon. Only used when Display Style is set to Custom Texture.</text>
+        <text>Which selector graphic the Custom Texture display style draws. Ready or Not: a fire-selector with baked mode text. Ready or Not (no text): the same graphic without the text. Color ON draws it red, OFF white. BWais's Firemode: uses the fire-selector atlas by BWais (bundled, no separate mod needed) and is tinted by the Hue/Opacity options. The selector body (with or without a burst position) is derived from the weapon's own fire modes, so it works for any weapon. Only used when Display Style is set to Custom Texture.</text>
     </string>
     <string id="rax_ammo_check_firemode_texture_lst_tx_ron_text">
         <text>Ready or Not</text>
@@ -811,7 +811,7 @@
         <text>Ready or Not (no text)</text>
     </string>
     <string id="rax_ammo_check_firemode_texture_lst_tx_bwais">
-        <text>BWais's texture (requires his mod)</text>
+        <text>BWais's Firemode</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_firemode_position">
         <text>Display Position</text>
@@ -1002,6 +1002,12 @@
     </string>
     <string id="ui_mcm_rax_ammo_check_eject_modifier_desc">
         <text>Optional modifier to hold together with the Eject Round key. None means the key works on its own.</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_mode">
+        <text>Activation Mode</text>
+    </string>
+    <string id="ui_mcm_rax_ammo_check_eject_mode_desc">
+        <text>How the Eject Round key activates: Press (single tap), Double-Tap, or Hold.</text>
     </string>
     <string id="ui_mcm_rax_ammo_check_eject_camera_anim">
         <text>Camera Motion on Other Weapons</text>

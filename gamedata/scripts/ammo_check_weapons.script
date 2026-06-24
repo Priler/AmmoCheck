@@ -261,6 +261,17 @@ ignore_fake_animations = {
 }
 
 
+--[ No-magazine inspect exclude list ]--
+-- Weapons whose dedicated anm_ammo_check_no_mag reads wrong on a mag-less gun (e.g. the
+-- hand still reaches for the magazine that is not there)
+-- Listing a weapon here makes a no-magazine ammo check IGNORE that animation and use the MCM "No-magazine fallback"
+-- (lower / hide / none) instead, exactly as if the weapon had no _no_mag anim at all.
+-- Longest-prefix match wins. Format: [prefix] = true
+no_mag_anim_exclude = {
+    ["wpn_vityaz_vitup"] = true, -- anm_ammo_check_no_mag still grabs the missing mag (dafuq?)
+}
+
+
 --[ Eject shell exclude list ]--
 -- Pump-action shotguns in this list will NOT eject a shell
 -- when checking ammo, even if "Eject Shell" option is enabled.
@@ -525,9 +536,28 @@ function get_ignore_fake_animation_override(sec)
     return nil
 end
 
+function should_ignore_no_mag_anim(sec)
+    if not sec then return false end
+
+    local cache_key = "no_mag_anim_exclude_" .. sec
+    if config_cache[cache_key] ~= nil then
+        return config_cache[cache_key]
+    end
+
+    for prefix, _ in pairs(no_mag_anim_exclude) do
+        if sec == prefix or string.find(sec, "^" .. prefix) then
+            config_cache[cache_key] = true
+            return true
+        end
+    end
+
+    config_cache[cache_key] = false
+    return false
+end
+
 function should_exclude_shell_eject(sec)
     if not sec then return false end
-    
+
     -- Check cache first
     local cache_key = "eject_exclude_" .. sec
     if config_cache[cache_key] ~= nil then

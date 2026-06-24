@@ -7,6 +7,8 @@
 local enabled       = false
 local mcm_key       = nil   -- DIK code; DIK_ESCAPE means unbound
 local mcm_modifier  = 0     -- 0 none, 1 shift, 2 ctrl, 3 alt (ui_mcm.get_mod_key)
+local mcm_mode      = 0     -- 0 tap (press), 1 double-tap, 2 hold
+local mcm_keybinds  = ui_mcm and ui_mcm.key_hold  -- false on MCM builds without the tap/hold helpers
 local camera_anim   = true  -- play the camera motion on non-bolt weapons
 local auto_eject    = false -- after a reload, auto eject a chambered round that mismatches the new mag
 local debug_mode    = false
@@ -27,18 +29,43 @@ end
 
 -- ### MCM
 
+-- Activation-mode dispatch
+local eject_modes = {
+    [0] = {
+        ["call"] = { "on_key_press", "on_key_hold" },
+        ["function"] = function(key) eject_one_round() end
+    },
+    [1] = {
+        ["call"] = { "on_key_press", "on_key_hold" },
+        ["function"] = function(key) if ui_mcm.double_tap("rax_ammo_check_eject", key) then eject_one_round() end end
+    },
+    [2] = {
+        ["call"] = { "on_key_hold", "on_key_press" },
+        ["function"] = function(key) if ui_mcm.key_hold("rax_ammo_check_eject", key) then eject_one_round() end end
+    }
+}
+
 function on_option_change()
     if not ui_mcm then return end
     local en = ui_mcm.get("rax_ammo_check/eject/enable")
     enabled = (en == true or en == 1)
     mcm_key = ui_mcm.get("rax_ammo_check/eject/key") or DIK_keys.DIK_ESCAPE
     mcm_modifier = ui_mcm.get("rax_ammo_check/eject/modifier") or 0
+    mcm_mode = ui_mcm.get("rax_ammo_check/eject/mode") or 0
+    if not mcm_keybinds then mcm_mode = 0 end  -- no tap/hold helpers: fall back to plain press
     local cam = ui_mcm.get("rax_ammo_check/eject/camera_anim")
     camera_anim = (cam == true or cam == 1 or cam == nil)  -- default true
     local ae = ui_mcm.get("rax_ammo_check/eject/auto_eject")
     auto_eject = (ae == true or ae == 1)
     local dbg = ui_mcm.get("rax_ammo_check/debug/debug_mode")
     debug_mode = (dbg == true or dbg == 1)
+
+    -- Reconcile the key callbacks to the chosen activation mode
+    if mcm_keybinds then
+        UnregisterScriptCallback(eject_modes[mcm_mode]["call"][1], this[eject_modes[mcm_mode]["call"][1]])
+        UnregisterScriptCallback(eject_modes[mcm_mode]["call"][2], this[eject_modes[mcm_mode]["call"][2]])
+        RegisterScriptCallback(eject_modes[mcm_mode]["call"][1], this[eject_modes[mcm_mode]["call"][1]])
+    end
 end
 
 function actor_on_first_update()
@@ -356,8 +383,29 @@ function on_key_press(key)
     if key ~= mcm_key then return end
     -- the eject key may not share the Reload bind: every reload would also eject a round
     if dik_to_bind(key) == key_bindings.kWPN_RELOAD then return end
+    if not mcm_keybinds then
+        eject_one_round()  -- old MCM without tap/hold helpers: plain press
+        return
+    end
     if not (mcm_modifier == 0 or ui_mcm.get_mod_key(mcm_modifier)) then return end
-    eject_one_round()
+    -- tap calls directly so a held movement/action key (sprint, crouch) does not get treated as a
+    -- key-combo and rejected by simple_press
+    -- double-tap / hold use their MCM helpers
+    if mcm_mode == 0 then
+        eject_one_round()
+    else
+        eject_modes[mcm_mode]["function"](key)
+    end
+end
+
+function on_key_hold(key)
+    if not enabled then return end
+    if not mcm_key or mcm_key == DIK_keys.DIK_ESCAPE then return end  -- unbound
+    if key ~= mcm_key then return end
+    if dik_to_bind(key) == key_bindings.kWPN_RELOAD then return end
+    if mcm_modifier == 0 or ui_mcm.get_mod_key(mcm_modifier) then
+        eject_modes[mcm_mode]["function"](key)
+    end
 end
 
 -- ADS during the eject animation cancels the HUD motion engine-side; cancel our scheduled
